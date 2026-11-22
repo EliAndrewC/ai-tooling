@@ -82,7 +82,7 @@
 # Mount HOST paths may be absolute, start with ~ (the invoking user's home), or
 # be RELATIVE TO THE REPO ROOT - so "..:/host-l7r-repo" mounts the repo's parent
 # directory (where the sibling l7r notes repo lives) at /host-l7r-repo, wherever
-# the tree is checked out (/home/eli/l7r/<repo>, /data/dev/l7r/<repo>, ...).
+# the tree is checked out (~/l7r/<repo>, /data/dev/l7r/<repo>, ...).
 #
 # Host scripts: this script lives in the ai-tooling repo (~/ai-tooling/host-scripts/, on
 # PATH as `launch-container`; it moved out of gm-assistant's scripts/ on 2026-10-03). That
@@ -189,7 +189,7 @@ PREFIX="${CONTAINER_PREFIX:-claude}"
 # running, and then it is the diagram one, whose gate is the expensive thing.
 # Shared ceiling went 11G/12G -> 9G/10G on 2026-09-28: with 3 containers full, the desktop
 # had ~3.4 GB left, got swapped out, and crawled for 10 min (keys took minutes) until a
-# hard reset. The swap bet does not hold once you use the desktop. See ~/this-laptop/docs/memory/.
+# hard reset. The swap bet does not hold once you use the desktop. (The laptop-side memory notes live in a private repo.)
 # 2026-09-29: 9G/10G -> 9G/9G. The diagram container sat at the 9G throttle for 3 min, re-reading
 # its evicted files nonstop; the disk stall froze the desktop (1.8 GB RAM still free) until another
 # hard reset. With HIGH == MAX the kernel OOM-kills inside the container instead of throttling it.
@@ -207,7 +207,7 @@ SLICE_SWAP_MAX="${CONTAINER_SLICE_SWAP_MAX:-0}"
 # Default weight is 100, so the desktop's app.slice and session.slice each outweigh the containers
 # 5x for CPU and 10x for disk. Set on the TOP slice (claude.slice for claude-containers.slice),
 # because weights only compete among siblings. They do nothing until cpu+io are delegated to the
-# user manager and the disk runs BFQ: ~/this-laptop/docs/memory/fix-memory-priority.sh (one-time, sudo).
+# user manager and the disk runs BFQ: a one-time sudo fix-memory-priority.sh in the private laptop repo.
 SLICE_CPU_WEIGHT="${CONTAINER_SLICE_CPU_WEIGHT-20}"
 SLICE_IO_WEIGHT="${CONTAINER_SLICE_IO_WEIGHT-10}"
 

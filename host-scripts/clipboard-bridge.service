@@ -1,5 +1,5 @@
 [Unit]
-Description=Clipboard bridge: dev-container tmux copies onto the desktop clipboard (~/this-laptop/host-scripts/clipboard-bridge.py)
+Description=Clipboard bridge: dev-container tmux copies onto the desktop clipboard (~/ai-tooling/host-scripts/clipboard-bridge.py)
 After=graphical-session.target
 PartOf=graphical-session.target
 

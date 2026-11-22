@@ -41,6 +41,20 @@ launch() { # launch <repo>: run the launcher there; output in $OUT, run args in 
 }
 vols() { grep -A1 -x -- --volume "$T/$1.args" | grep -v -x -e --volume -e --; }
 
+# --- set_git_identity (runs only on the shell path, so tested on its own): the container gets the
+# HOST's global git identity, passed as env, never a hardcoded one; no host identity sets nothing.
+gid() ( # gid <name> <email>: run the function with a stub podman; prints the exec args, one per line
+  eval "$(sed -n '/^set_git_identity() {/,/^}/p' "$HERE/launch-container.sh")"
+  podman() { printf '%s\n' "$@"; }
+  export GIT_CONFIG_GLOBAL="$T/gitconfig-$RANDOM"; : > "$GIT_CONFIG_GLOBAL"
+  [ -n "$1" ] && git config --global user.name "$1" && git config --global user.email "$2"
+  NAME=fakebox set_git_identity
+)
+GID=$(gid "Test Person" "test@example.com")
+check "git identity: the host's name and email are passed to the container" 'grep -qx "GIT_ID_NAME=Test Person" <<<"$GID" && grep -qx "GIT_ID_EMAIL=test@example.com" <<<"$GID"'
+check "git identity: no hardcoded identity in the launcher" '! grep -q "user.email [a-z]*@" "$HERE/launch-container.sh"'
+check "git identity: unset on the host -> no podman exec at all" '[ -z "$(gid "" "")" ]'
+
 # --- no .volume-overrides/: nothing extra, no override line
 newrepo plain
 launch plain

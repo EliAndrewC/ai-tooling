@@ -2,12 +2,12 @@
 #
 # fix-voice-corrections.sh: install spacebar-watch, the system service that tells the voice-corrections
 # Claude Code mod whether the space bar is held (so it never rewrites the prompt box mid-dictation).
-# Reading keyboards needs the root:input devices; the service runs as eli with `input` as a supplementary
-# group, so no other process gains keyboard access. See ~/this-laptop/docs/claude-code/CLAUDE.md
+# Reading keyboards needs the root:input devices; the service runs as you with `input` as a supplementary
+# group, so no other process gains keyboard access. See host-scripts/voice-corrections/CLAUDE.md
 # (Voice corrections) and spacebar-watch.py's docstring.
 #
 # The script is copied to /opt/voice-corrections/ (root-owned) rather than run from the repo checkout, so a
-# process running as eli can't edit code that runs with input-group access. Re-run after changing it.
+# process running as you can't edit code that runs with input-group access. Re-run after changing it.
 #
 # Run as your normal user; the script calls sudo.
 #   fix-voice-corrections.sh           install or update, then start
@@ -21,7 +21,6 @@ STATE_DIR="$HOME/.claude/voice-corrections"
 UNIT=spacebar-watch.service
 
 [ "$(id -u)" -eq 0 ] && { echo "Run this as your normal user, not root." >&2; exit 1; }
-[ "$(id -un)" = eli ] || { echo "The unit runs as eli; edit User= in $UNIT first." >&2; exit 1; }
 
 check() {
   systemctl is-active "$UNIT" >/dev/null 2>&1 && echo "service: active" || echo "service: NOT active (run fix-voice-corrections.sh)"
@@ -52,7 +51,11 @@ sudo -v
 mkdir -p "$STATE_DIR"
 sudo install -d -m 755 -o root -g root /opt/voice-corrections
 sudo install -m 644 -o root -g root "$HERE/spacebar-watch.py" /opt/voice-corrections/spacebar-watch.py
-sudo install -m 644 -o root -g root "$HERE/$UNIT" "/etc/systemd/system/$UNIT"
+# The unit is a template: @USER@/@GROUP@/@HOME@ become whoever runs this script.
+rendered="$(mktemp)"
+sed -e "s#@USER@#$(id -un)#g" -e "s#@GROUP@#$(id -gn)#g" -e "s#@HOME@#$HOME#g" "$HERE/$UNIT" >"$rendered"
+sudo install -m 644 -o root -g root "$rendered" "/etc/systemd/system/$UNIT"
+rm -f "$rendered"
 sudo systemctl daemon-reload
 sudo systemctl enable "$UNIT"
 sudo systemctl restart "$UNIT"

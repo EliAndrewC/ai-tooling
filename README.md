@@ -30,6 +30,8 @@ host runs Linux with systemd user services, and some comments mention my own pro
 
 Install: `hooks/install.sh` (it only rewrites files that differ, atomically) and merge
 `hooks/settings.example.json` into `~/.claude/settings.json`. `hooks/install.sh --check` reports drift.
+Install never silently overwrites a hand edit made in `~/.claude/hooks/` (e.g. by a container session, which
+can't see this repo): it refuses until the edit is copied back here, or `--force` discards it.
 Run every `hooks/test-*.sh` after a change (each ends with `N passed, 0 failed`).
 
 Why copies and not a symlink: containers mount `~/.claude` and run `$HOME/.claude/hooks/...`, so a link

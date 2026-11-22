@@ -7,7 +7,7 @@ timer can tell a thinking pause from the end of a recording. Wayland gives apps 
 this reads the kernel's keyboard devices directly.
 
 Security: the input devices are root:input. Rather than put Eli in the `input` group (every process of his
-could then log every key, passwords included), this one process runs as eli with `input` as a
+could then log every key, passwords included), this one process runs as the installing user with `input` as a
 supplementary group (spacebar-watch.service), watches KEY_SPACE only, and publishes only that.
 
 State file: ~/.claude/voice-corrections/spacebar (under ~/.claude so dev containers see it through their
