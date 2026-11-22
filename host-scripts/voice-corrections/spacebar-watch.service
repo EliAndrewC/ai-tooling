@@ -1,0 +1,27 @@
+# Installed to /etc/systemd/system/ by fix-voice-corrections.sh. See spacebar-watch.py's docstring.
+# Runs as eli with `input` as a supplementary group, so only this process can read keyboards.
+[Unit]
+Description=Publish space-bar held/released state for the voice-corrections Claude Code mod
+After=systemd-udev-settle.service
+
+[Service]
+Type=simple
+User=eli
+Group=eli
+SupplementaryGroups=input
+ExecStart=/usr/bin/python3 -I /opt/voice-corrections/spacebar-watch.py --state /home/eli/.claude/voice-corrections/spacebar
+Restart=always
+RestartSec=2
+NoNewPrivileges=yes
+PrivateNetwork=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/eli/.claude/voice-corrections
+PrivateTmp=yes
+DevicePolicy=closed
+DeviceAllow=char-input r
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

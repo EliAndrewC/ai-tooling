@@ -1,0 +1,10 @@
+[Unit]
+Description=memwatch + memguard: memory warnings/OOM-kill events for Claude sessions, and kill the biggest container process when they thrash (~/ai-tooling/memwatch/memwatch-events.sh)
+
+[Service]
+ExecStart=%h/ai-tooling/memwatch/memwatch-events.sh
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

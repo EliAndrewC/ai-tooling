@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+hooks/logs/
+.env
+.env.*
+*.token
+*-credentials

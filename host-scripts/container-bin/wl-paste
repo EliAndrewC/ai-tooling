@@ -1,0 +1,10 @@
+#!/bin/sh
+# Stand-in for wl-paste inside a dev container: prints the HOST clipboard, which the host's
+# clipboard-bridge service keeps in /clipboard-bridge/.host-clipboard (see clipboard-bridge.py).
+# It exists for Claude Code's right-click paste, which runs exactly `wl-paste --no-newline`.
+# Anything else (--primary for middle-click, --type/--list-types for image paste) fails like an
+# empty clipboard, so Claude Code never mistakes this text for an image.
+[ "$*" = "--no-newline" ] || [ -z "$*" ] || exit 1
+f=/clipboard-bridge/.host-clipboard
+[ -r "$f" ] || exit 1
+cat "$f"

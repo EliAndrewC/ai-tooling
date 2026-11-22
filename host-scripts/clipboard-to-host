@@ -1,0 +1,11 @@
+#!/bin/sh
+# Container side of the clipboard bridge (host side: clipboard-bridge.py, which explains why).
+# launch-container's tmux config runs this on every tmux copy:
+#   clipboard-to-host NAME --tmux-buffer   save tmux's newest buffer (after load-buffer / set-buffer,
+#                                          which is how Claude Code copies inside tmux)
+#   clipboard-to-host NAME                 read stdin (tmux copy-mode's copy-command)
+# It writes /clipboard-bridge/NAME atomically. No mount (a container made before 2026-10-10) = no-op.
+dir=/clipboard-bridge
+[ -d "$dir" ] && [ -n "$1" ] || { [ "$2" = --tmux-buffer ] || cat >/dev/null 2>&1; exit 0; }
+tmp="$dir/.$1.tmp"
+if [ "$2" = --tmux-buffer ]; then tmux save-buffer "$tmp"; else cat > "$tmp"; fi && mv -f "$tmp" "$dir/$1"

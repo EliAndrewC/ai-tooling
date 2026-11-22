@@ -1,0 +1,6 @@
+{
+  "name": "voice-corrections",
+  "version": "1.0.0",
+  "description": "Fixes known voice-to-text mis-transcriptions in dictated prompt text, after the space bar is released and before Enter.",
+  "license": "UNLICENSED"
+}

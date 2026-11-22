@@ -1,0 +1,208 @@
+{
+  "//": "Merge this 'hooks' block into ~/.claude/settings.json after running hooks/install.sh. Drop the lines for hooks you don't want; memwatch-hook.sh also needs the memwatch service (memwatch/CLAUDE.md).",
+  "statusLine": {
+    "type": "command",
+    "command": "python3 \"$HOME/.claude/hooks/usage_cap.py\" statusline"
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$HOME/.claude/hooks/tab-title.sh\" idle",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$HOME/.claude/hooks/voice-mod-check.sh\""
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$HOME/.claude/hooks/tab-title.sh\" busy",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$HOME/.claude/hooks/memwatch-hook.sh\" deliver",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$HOME/.claude/hooks/tab-title.sh\" busy",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.claude/hooks/usage_cap.py\" hook pre",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.claude/hooks/readme-guard.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "ScheduleWakeup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.claude/hooks/wakeup-guard.py\" pretool",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.claude/hooks/usage_cap.py\" hook end",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$HOME/.claude/hooks/tab-title.sh\" stop",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.claude/hooks/wakeup-guard.py\" stop",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$HOME/.claude/hooks/memwatch-hook.sh\" wait",
+            "timeout": 86400,
+            "asyncRewake": true
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.claude/hooks/usage_cap.py\" hook post",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$HOME/.claude/hooks/tab-title.sh\" busy",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$HOME/.claude/hooks/memwatch-hook.sh\" deliver",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$HOME/.claude/hooks/missing-program-hook.sh\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$HOME/.claude/hooks/memwatch-hook.sh\" deliver",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$HOME/.claude/hooks/missing-program-hook.sh\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$HOME/.claude/hooks/tab-title.sh\" ask",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"$HOME/.claude/hooks/prompt-timeout.py\"",
+            "timeout": 180
+          }
+        ]
+      }
+    ]
+  }
+}

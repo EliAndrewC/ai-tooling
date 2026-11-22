@@ -1,0 +1,12 @@
+[Unit]
+Description=Clipboard bridge: dev-container tmux copies onto the desktop clipboard (~/this-laptop/host-scripts/clipboard-bridge.py)
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+ExecStart=/usr/bin/python3 %h/ai-tooling/host-scripts/clipboard-bridge.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target

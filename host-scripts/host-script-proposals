@@ -1,0 +1,154 @@
+#!/usr/bin/env python3
+"""host-script-proposals - review the queue of host-script changes proposed from containers.
+
+Run ON THE HOST (a host Claude session). Containers see host-scripts/ read-only and queue changes
+with /host-scripts/propose; they land in ~/.local/share/host-script-proposals/<session>/<path>,
+with <path>.base (the version the proposal started from) and <path>.why.md (its reason).
+
+    host-script-proposals              list pending proposals
+    host-script-proposals --summary    one line, or nothing when the queue is empty (the hook)
+    host-script-proposals diff ID      reason, the proposed change, and anything landed meanwhile
+    host-script-proposals merge ID     three-way merge the proposal into host-scripts/<path>
+    host-script-proposals drop ID      delete the proposal (after merging, or when rejecting it)
+
+ID is <session>/<path> as `list` prints it. The content came from a container: review it as
+untrusted code before merging, then commit and push this repo, then drop it.
+"""
+
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+HOST_SCRIPTS = Path(os.environ.get("HOST_SCRIPTS_DIR") or Path(__file__).resolve().parent)
+QUEUE = Path(os.environ.get("HOST_SCRIPT_PROPOSALS")
+             or Path.home() / ".local/share/host-script-proposals")
+
+
+def die(msg: str) -> None:
+    print(f"host-script-proposals: {msg}", file=sys.stderr)
+    sys.exit(2)
+
+
+def proposals() -> list[str]:
+    if not QUEUE.is_dir():
+        return []
+    out = []
+    for p in sorted(QUEUE.rglob("*")):
+        if p.is_file() and not p.name.endswith((".base", ".why.md")):
+            out.append(str(p.relative_to(QUEUE)))
+    return out
+
+
+def paths(pid: str) -> tuple[Path, Path, Path, Path]:
+    if ".." in Path(pid).parts or len(Path(pid).parts) < 2:
+        die(f"bad ID {pid!r}: want <session>/<path>, as `list` prints it")
+    prop = QUEUE / pid
+    if not prop.is_file():
+        die(f"no proposal {pid} (see `host-script-proposals` for the list)")
+    rel = Path(*Path(pid).parts[1:])
+    return prop, prop.with_name(prop.name + ".base"), prop.with_name(prop.name + ".why.md"), HOST_SCRIPTS / rel
+
+
+def read(p: Path) -> bytes:
+    return p.read_bytes() if p.exists() else b""
+
+
+def status(pid: str) -> str:
+    prop, base, _, cur = paths(pid)
+    if read(prop) == read(base):
+        return "not edited yet"
+    if not base.exists():
+        return "no .base (made without `propose`): diff is against the current file"
+    if read(base) != read(cur):
+        return "host file changed since it was proposed: merge is three-way"
+    return "ready"
+
+
+def diff(a: Path, b: Path, la: str, lb: str) -> None:
+    sys.stdout.flush()  # or, when piped, diff's output lands before the headings printed so far
+    subprocess.run(["diff", "-u", "--label", la, "--label", lb,
+                    str(a) if a.exists() else "/dev/null", str(b) if b.exists() else "/dev/null"])
+
+
+def merged(pid: str) -> tuple[bytes, int]:
+    """(merged content, conflict count) of current <- base -> proposal."""
+    prop, base, _, cur = paths(pid)
+    if not base.exists():
+        return read(prop), 0
+    # A real file for "current": git merge-file misreads /dev/stdin when it is a pipe.
+    with tempfile.NamedTemporaryFile() as tmp:
+        tmp.write(read(cur))
+        tmp.flush()
+        r = subprocess.run(["git", "merge-file", "-p", "-L", "host-scripts (current)", "-L", "base",
+                            "-L", f"proposal {pid}", tmp.name, str(base), str(prop)],
+                           capture_output=True)
+    if r.returncode < 0 or r.returncode > 127:
+        die(f"git merge-file failed: {r.stderr.decode(errors='replace')}")
+    return r.stdout, r.returncode
+
+
+def main(argv: list[str]) -> None:
+    cmd = argv[0] if argv else "list"
+    if cmd in ("-h", "--help"):
+        print(__doc__.strip())
+        return
+    if cmd == "--summary":
+        ps = proposals()
+        if ps:
+            sessions = sorted({p.split("/", 1)[0] for p in ps})
+            print(f"{len(ps)} host-script proposal(s) pending from {', '.join(sessions)}: "
+                  "review with `host-script-proposals` (diff / merge / drop).")
+        return
+    if cmd == "list":
+        ps = proposals()
+        if not ps:
+            print(f"No proposals pending in {QUEUE}.")
+        for p in ps:
+            age = (time.time() - (QUEUE / p).stat().st_mtime) / 3600
+            print(f"{p}   ({age:.0f}h old; {status(p)})")
+        return
+    if len(argv) != 2:
+        die(f"`{cmd}` needs one ID; try --help")
+    pid = argv[1]
+    prop, base, why, cur = paths(pid)
+    if cmd == "diff":
+        print(f"==== {pid}: {status(pid)}\n")
+        print(why.read_text(errors="replace") if why.exists() else "(no .why.md)")
+        print("\n==== the proposed change (base -> proposal)")
+        diff(base if base.exists() else cur, prop, "base", "proposal")
+        if base.exists() and read(base) != read(cur):
+            print("\n==== landed in host-scripts since the proposal started (base -> current)")
+            diff(base, cur, "base", "current")
+            _, conflicts = merged(pid)
+            print(f"\n==== three-way merge: {conflicts} conflict(s)")
+    elif cmd == "merge":
+        out, conflicts = merged(pid)
+        if conflicts:
+            die(f"{conflicts} conflict(s); nothing written. Resolve by hand: "
+                f"git merge-file {cur} {base} {prop}  (edits {cur} in place, with conflict markers)")
+        mode = cur.stat().st_mode if cur.exists() else prop.stat().st_mode
+        cur.parent.mkdir(parents=True, exist_ok=True)
+        cur.write_bytes(out)
+        cur.chmod(mode)
+        print(f"merged into {cur}. Review `git diff`, commit and push, then: host-script-proposals drop {pid}")
+    elif cmd == "drop":
+        for p in (prop, base, why):
+            if p.exists():
+                p.chmod(0o644)
+                p.unlink()
+        d = prop.parent
+        while d != QUEUE and d.is_dir() and not any(d.iterdir()):
+            d.rmdir()
+            d = d.parent
+        print(f"dropped {pid}")
+    else:
+        die(f"unknown command {cmd!r}; try --help")
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

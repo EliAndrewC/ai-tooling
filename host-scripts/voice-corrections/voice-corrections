@@ -1,0 +1,224 @@
+#!/usr/bin/env python3
+"""voice-corrections: edit Eli's voice-to-text corrections (~/.claude/voice-corrections/corrections.json).
+
+The voice-corrections Claude Code mod reads that file and fixes dictated prompt text before it is sent
+(CLAUDE.md beside this script). Any session, host or dev container, adds a correction the moment Eli names
+a mis-transcription or one is spotted. Host: `voice-corrections ...` (on PATH). Container:
+`/host-scripts/voice-corrections/voice-corrections ...`.
+
+  voice-corrections add FROM TO [--near W ...] [--not-near W ...] [--window N] [--exact-case]
+                    [--example "DICTATED => EXPECTED"] [--note TEXT]
+  voice-corrections add-pattern REGEX TO [--flags i] [--example ...] [--note TEXT]
+  voice-corrections remove FROM_OR_REGEX
+  voice-corrections list [SEARCH]
+  voice-corrections try "some dictated text"      what the mod would turn it into
+  voice-corrections check                          validate the file and run every rule's examples
+
+FROM matches whole words, case-insensitively; spaces match any whitespace. A TO with a capital letter is
+used as written; an all-lowercase TO is capitalized only at a sentence start. --near words/phrases (any
+one within --window words, default 5) are required; --not-near ones veto. REGEX is a JavaScript regular
+expression ($1 in TO). Rules apply in file order; each new rule goes last.
+
+Every write takes an exclusive lock and replaces the file atomically, so concurrent sessions can't lose
+each other's rules and the mod never reads half a file. A rule is refused if it would not be idempotent
+(its TO contains a FROM another rule rewrites), and `add` runs `check` before saving when node is present.
+"""
+import argparse
+import contextlib
+import fcntl
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+CORRECTOR_TEST = os.path.join(HERE, "mod", "hooks", "test-corrector.mjs")
+APPLY = os.path.join(HERE, "mod", "hooks", "apply.mjs")
+PATH = os.path.expanduser(os.environ.get("VOICE_CORRECTIONS_FILE", "~/.claude/voice-corrections/corrections.json"))
+
+
+def die(msg):
+    print(f"voice-corrections: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+@contextlib.contextmanager
+def locked():
+    os.makedirs(os.path.dirname(PATH), exist_ok=True)
+    with open(PATH + ".lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
+
+
+def load():
+    try:
+        with open(PATH) as f:
+            config = json.load(f)
+    except FileNotFoundError:
+        return {"rules": []}
+    except json.JSONDecodeError as e:
+        die(f"{PATH} is not valid JSON ({e}); fix it by hand or restore it from git (if you back it up there)")
+    config.setdefault("rules", [])
+    return config
+
+
+def save(config):
+    d = os.path.dirname(PATH)
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".corrections-", suffix=".json")
+    with os.fdopen(fd, "w") as f:
+        json.dump(config, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, PATH)
+
+
+def key(rule):
+    return rule.get("from") or rule.get("pattern")
+
+
+def word_re(phrase):
+    body = r"\s+".join(re.escape(w) for w in phrase.split())
+    return re.compile(rf"(?<![\w'’]){body}(?![\w'’])", re.I)
+
+
+def idempotency_problems(rules):
+    """A rule whose output contains another rule's FROM can change text on a second pass."""
+    problems = []
+    plain = [r for r in rules if r.get("from")]
+    for r in rules:
+        to = r.get("to", "")
+        for other in plain:
+            if other is r or other.get("near") or other.get("not_near"):
+                continue
+            if word_re(other["from"]).search(to) and not word_re(other["from"]).search(other["to"]):
+                problems.append(f'"{key(r)}" -> "{to}" contains "{other["from"]}", which another rule rewrites')
+    return problems
+
+
+def parse_examples(items):
+    out = []
+    for item in items or []:
+        if "=>" not in item:
+            die(f'--example needs "DICTATED => EXPECTED", got {item!r}')
+        a, b = item.split("=>", 1)
+        out.append([a.strip(), b.strip()])
+    return out
+
+
+def run_check(config_path):
+    if not shutil.which("node"):
+        print("check: node not found; JSON and idempotency checked, examples not run")
+        return True
+    r = subprocess.run(["node", CORRECTOR_TEST, config_path], capture_output=True, text=True)
+    print(r.stdout.strip())
+    if r.returncode:
+        print(r.stderr.strip(), file=sys.stderr)
+    return r.returncode == 0
+
+
+def add_rule(rule):
+    with locked():
+        config = load()
+        rules = [r for r in config["rules"] if key(r) != key(rule)]
+        replaced = len(rules) != len(config["rules"])
+        rules.append(rule)
+        problems = idempotency_problems(rules)
+        if problems:
+            die("refused, not idempotent:\n  " + "\n  ".join(problems))
+        config["rules"] = rules
+        # Run the examples against a temp copy before saving, so a bad rule never reaches the mod.
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(config, f)
+        try:
+            if not run_check(f.name):
+                die("refused: an example failed (above); nothing saved")
+        finally:
+            os.unlink(f.name)
+        save(config)
+    print(("replaced" if replaced else "added") + f": {key(rule)} -> {rule['to']}")
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    a = sub.add_parser("add")
+    a.add_argument("frm", metavar="FROM")
+    a.add_argument("to", metavar="TO")
+    a.add_argument("--near", nargs="+")
+    a.add_argument("--not-near", nargs="+")
+    a.add_argument("--window", type=int)
+    a.add_argument("--exact-case", action="store_true")
+    a.add_argument("--example", action="append")
+    a.add_argument("--note")
+    p = sub.add_parser("add-pattern")
+    p.add_argument("pattern")
+    p.add_argument("to")
+    p.add_argument("--flags", default="i")
+    p.add_argument("--example", action="append")
+    p.add_argument("--note")
+    r = sub.add_parser("remove")
+    r.add_argument("key")
+    lst = sub.add_parser("list")
+    lst.add_argument("search", nargs="?")
+    t = sub.add_parser("try")
+    t.add_argument("text")
+    sub.add_parser("check")
+    args = ap.parse_args()
+
+    if args.cmd == "add":
+        rule = {"from": args.frm, "to": args.to}
+        if args.exact_case:
+            rule["case"] = "exact"
+        if args.near:
+            rule["near"] = args.near
+        if args.not_near:
+            rule["not_near"] = args.not_near
+        if args.window:
+            rule["window"] = args.window
+        if args.note:
+            rule["note"] = args.note
+        if args.example:
+            rule["examples"] = parse_examples(args.example)
+        add_rule(rule)
+    elif args.cmd == "add-pattern":
+        rule = {"pattern": args.pattern, "flags": args.flags, "to": args.to}
+        if args.note:
+            rule["note"] = args.note
+        if args.example:
+            rule["examples"] = parse_examples(args.example)
+        add_rule(rule)
+    elif args.cmd == "remove":
+        with locked():
+            config = load()
+            rules = [r for r in config["rules"] if key(r) != args.key]
+            if len(rules) == len(config["rules"]):
+                die(f"no rule with FROM or pattern {args.key!r}; see `voice-corrections list`")
+            config["rules"] = rules
+            save(config)
+        print(f"removed: {args.key}")
+    elif args.cmd == "list":
+        for rule in load()["rules"]:
+            line = json.dumps({k: v for k, v in rule.items() if k != "examples"}, ensure_ascii=False)
+            if not args.search or args.search.lower() in line.lower():
+                print(line)
+    elif args.cmd == "try":
+        if not shutil.which("node"):
+            die("try needs node (the mod's corrector is JavaScript)")
+        r = subprocess.run(["node", APPLY, PATH], input=args.text, capture_output=True, text=True)
+        if r.returncode:
+            die(r.stderr.strip())
+        print(r.stdout, end="")
+    elif args.cmd == "check":
+        config = load()
+        problems = idempotency_problems(config["rules"])
+        for p in problems:
+            print("not idempotent: " + p)
+        ok = run_check(PATH) and not problems
+        sys.exit(0 if ok else 1)
+
+
+if __name__ == "__main__":
+    main()
