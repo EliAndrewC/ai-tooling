@@ -47,3 +47,7 @@ bash host-scripts/test-proposals.sh
 bash host-scripts/test-clipboard-bridge.sh
 node host-scripts/voice-corrections/mod/hooks/test-corrector.mjs
 ```
+
+## License
+
+CC0 1.0 Universal (public domain dedication); see `LICENSE`.
