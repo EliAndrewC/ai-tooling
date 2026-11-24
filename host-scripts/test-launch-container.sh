@@ -166,5 +166,32 @@ shell --attach 1
 check "attaching to a running session leaves the history alone" '[ "$(tail -1 "$FAKE_HOME/.bash_history")" = "vim notes" ]'
 check "--attach NAME still attaches directly" 'grep -q "EXEC-IT: .*tmux -u attach -t 1" <<<"$OUT"'
 
+# --- a STOPPED container whose mount source is gone: refused before `podman start`, with the fix
+mkdir -p "$T/stopbin" "$T/still-here"
+cat > "$T/stopbin/podman" <<EOF3
+#!/usr/bin/env bash
+case "\$1" in
+  container) exit 0 ;;                         # exists
+  ps) exit 0 ;;                                # not running
+  inspect) case "\$*" in *Mounts*Source*) printf '%s|%s\n' "$T/still-here" /repo "\$FAKE_GONE" "\$FAKE_GONE_DST" ;; esac ;;
+  start) echo started >> "$T/started" ;;
+  *) exit 0 ;;
+esac
+EOF3
+chmod +x "$T/stopbin/podman"
+newrepo stopped
+stopped() { OUT=$(cd "$T/stopped" && PATH="$T/stopbin:$PATH" bash "$HERE/launch-container.sh" --no-shell 2>&1); RC=$?; }
+export FAKE_GONE="$T/old/host-scripts" FAKE_GONE_DST=/host-scripts
+stopped
+check "stopped container, host-scripts source gone: refused, not started" '[ "$RC" -ne 0 ] && [ ! -e "$T/started" ]'
+check "the error prints the exact ln -s fix" 'grep -qF "ln -s '"'"'$HERE'"'"' '"'"'$T/old/host-scripts'"'"'" <<<"$OUT"'
+check "the error warns that --fresh deletes the container" 'grep -q -- "--fresh.*deletes" <<<"$OUT"'
+export FAKE_GONE="$T/old/data" FAKE_GONE_DST=/data
+stopped
+check "another missing source: named, generic fix" '[ "$RC" -ne 0 ] && grep -qF "$T/old/data (mounted at /data)" <<<"$OUT" && grep -q "ln -s NEW" <<<"$OUT"'
+export FAKE_GONE="$T/still-here" FAKE_GONE_DST=/data
+stopped
+check "all sources present: the container is started" '[ "$RC" -eq 0 ] && [ -s "$T/started" ]'
+
 rm -rf "$T"
 [ "$FAIL" -eq 0 ] && echo "all green" || { echo "FAILURES"; exit 1; }

@@ -609,6 +609,32 @@ note_missing_host_scripts() {
   fi
 }
 
+# A stopped container whose bind-mount source has since moved or been deleted cannot start:
+# podman fails with "error stat'ing file ...: OCI runtime attempted to invoke a command that was
+# not found", which names no fix (2026-11-24: host-scripts/ had moved to ai-tooling; the running
+# containers kept their mounts until a reboot stopped them). Mounts are fixed at creation, so the
+# choices are a symlink at the old path or a recreate. Say which, before podman's error.
+check_mount_sources() {
+  local src dst bad=0 here
+  here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"   # HOST_SCRIPTS_DIR is only set further down
+  while IFS='|' read -r src dst; do   # not a tab: podman's formatter turns tabs into padding
+    [ -n "$src" ] || continue
+    [ -e "$src" ] && continue
+    bad=1
+    echo ">> ERROR: '$NAME' cannot start: its mount source $src (mounted at $dst) no longer exists." >&2
+    if [ "$dst" = /host-scripts ]; then
+      echo "   The host scripts moved. Link the old path to them, then launch again:" >&2
+      echo "     ln -s '$here' '$src'" >&2
+    else
+      echo "   Put it back (or symlink the old path to its new place: ln -s NEW '$src'), then launch again." >&2
+    fi
+  done < <(podman inspect -f '{{range .Mounts}}{{.Source}}|{{.Destination}}{{"\n"}}{{end}}' "$NAME" 2>/dev/null)
+  if [ "$bad" -eq 1 ]; then
+    echo "   (launch-container --fresh also works, but it deletes the container and everything stored in it.)" >&2
+    exit 1
+  fi
+}
+
 # ---- if a container of this name exists, attach (or recreate with --fresh) ----
 if [ "$FRESH" -eq 1 ] && podman container exists "$NAME" 2>/dev/null; then
   echo ">> --fresh: removing existing container '$NAME'"
@@ -634,6 +660,7 @@ if podman container exists "$NAME" 2>/dev/null; then
   else
     echo ">> '$NAME' exists but is stopped; starting it (--no-shell)."
   fi
+  check_mount_sources
   podman start "$NAME" >/dev/null
   note_missing_host_scripts
   [ "$SHELL_AFTER" -eq 1 ] || exit 0

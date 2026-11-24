@@ -44,6 +44,9 @@ prints a one-line notice when proposals are pending. Then:
 A change to `claude-diagnostics/files/` or `libexec/` only takes effect when Eli re-runs
 `sudo ~/ai-tooling/host-scripts/claude-diagnostics/grant-claude-diagnostics.sh`; say so.
 A change to the mounts only reaches a container after `launch-container --fresh`.
+Moving or deleting a folder that an existing container mounts breaks its next start (after a stop or
+reboot), not the running container. The launcher checks this before `podman start` and prints the `ln -s`
+fix; a symlink at the old path is enough, no recreate needed.
 
 ## Per-project Claude account: `.volume-overrides/`
 
