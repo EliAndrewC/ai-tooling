@@ -45,7 +45,8 @@
 #
 # /rename fires no hook, so the first call in a session also starts ONE watcher per tab (setsid,
 # detached from the hook's pipes, gone when the tab's session ends) that re-titles within a second of
-# the tab's registry name changing, keeping the current icon.
+# the tab's registry name changing, keeping the current icon. $RUN_DIR/<tab pid>.watch holds its pid
+# and WATCH_VERSION.
 #
 # The last Stop payload is kept per session at $RUN_DIR/<session pid>.stop.json (overwritten each
 # turn): when a tab shows the hourglass and you think it should not, it says which background task or
@@ -53,6 +54,21 @@
 # A ScheduleWakeup left pending as a "fallback" was the usual culprit (2026-09-26 diagram, 2026-10-27
 # character-sheet); wakeup-guard.py now refuses one outside a live /loop and blocks a turn from ending
 # while one is pending, so a stray hourglass should no longer come from that.
+#
+# A STALLED BACKGROUND SHELL IS NOT WORK (2026-11-24). A background shell that hangs stays "running"
+# in every later Stop payload, and nothing in the payload says it is hung: a `grep -r /` blocked
+# reading /dev/snd/timer kept one tab on the hourglass for 15 hours. So while the icon is BACKGROUND
+# the watcher measures, every $TAB_TITLE_STALL_CHECK_SECS (60), the processes of each background
+# shell (found by the task's output file, <scratchpad_dir>/../tasks/<id>.output, on their fd 1 or 2,
+# plus all descendants). When, for $TAB_TITLE_STALL_SECS (1800) on end, the set of processes is the
+# same, they have read and written no bytes, the output file has not changed and they used under 1%
+# of a core (a hung ugrep still polls select()), the tab shows IDLE. It goes back to the hourglass if
+# any of that moves. Only when EVERY background task is such a shell and no one-shot cron is pending:
+# subagents, monitors and workflows are never judged, and a shell whose processes can't be found
+# keeps the hourglass. Known false positive: one silent wait longer than the limit (`sleep 3600`, a
+# quiet `tail -f`) shows IDLE until it ends; a polling loop does not (its process set changes).
+# `tab-title.sh __stalled <session pid>` runs one measurement (exit 0 = stalled); the samples are in
+# $RUN_DIR/<session pid>.stall. Tests: test-tab-title.sh.
 # Never fails a hook: every path exits 0 and prints nothing.
 
 ICON_IDLE="✳"
@@ -74,14 +90,110 @@ registry_name() {  # registry_name <pid> -> the tab's name in the registry, else
   printf '%s' "$n"
 }
 
-if [ "${1:-}" = __watch ]; then  # the rename watcher: __watch <tab pid> <tty> <session pid>
-  tab=$2 tty=$3 me=$4 last=$(registry_name "$2")
+# Bump when the watcher's code changes: a hook call replaces a running watcher of another version
+# (watchers live as long as their tab, which can be weeks).
+WATCH_VERSION=2
+STALL_SECS="${TAB_TITLE_STALL_SECS:-1800}"
+STALL_CHECK_SECS="${TAB_TITLE_STALL_CHECK_SECS:-60}"
+
+stalled() {  # stalled <session pid>: takes one sample; exit 0 when every background task is a stalled shell
+  python3 - "$RUN_DIR/$1.stop.json" "$RUN_DIR/$1.stall" "$STALL_SECS" 2>/dev/null <<'PY'
+import json, os, sys, time
+stop_path, state_path, limit = sys.argv[1], sys.argv[2], float(sys.argv[3])
+NO = 1  # not stalled, or can't tell: the hourglass stays
+try:
+    d = json.load(open(stop_path))
+except Exception:
+    sys.exit(NO)
+bg = d.get("background_tasks") or []
+crons = [c for c in (d.get("session_crons") or []) if not (isinstance(c, dict) and c.get("recurring"))]
+if crons or not bg:
+    sys.exit(NO)
+if any(not isinstance(t, dict) or t.get("type") != "shell" or not t.get("id") for t in bg):
+    sys.exit(NO)
+scratch = (d.get("scratchpad_dir") or "").rstrip("/")
+if not scratch:
+    sys.exit(NO)
+tasks = os.path.join(os.path.dirname(scratch), "tasks")
+outs = sorted(os.path.join(tasks, str(t["id"]) + ".output") for t in bg)
+
+ppid, ticks, roots = {}, {}, {o: set() for o in outs}
+for name in os.listdir("/proc"):
+    if not name.isdigit():
+        continue
+    pid = int(name)
+    try:
+        f = open("/proc/%d/stat" % pid).read().rsplit(")", 1)[1].split()
+        ppid[pid], ticks[pid] = int(f[1]), int(f[11]) + int(f[12])  # ppid, utime + stime
+    except Exception:
+        continue
+    for fd in (1, 2):
+        try:
+            target = os.readlink("/proc/%d/fd/%d" % (pid, fd))
+        except OSError:
+            continue
+        if target in roots:
+            roots[target].add(pid)
+if not all(roots.values()):
+    sys.exit(NO)  # a task with no process we can see: finished, or laid out in a way we do not know
+tree = set().union(*roots.values())
+grew = True
+while grew:
+    more = {p for p, pp in ppid.items() if pp in tree and p not in tree}
+    grew = bool(more)
+    tree |= more
+io = 0
+for pid in tree:
+    try:
+        for line in open("/proc/%d/io" % pid):
+            if line.startswith(("rchar:", "wchar:")):
+                io += int(line.split()[1])
+    except Exception:
+        sys.exit(NO)  # another user's process (sudo ...): can't measure it
+try:
+    out = [[os.stat(o).st_mtime_ns, os.stat(o).st_size] for o in outs]
+except OSError:
+    sys.exit(NO)
+now = time.time()
+cur = {"t": now, "pids": sorted(tree), "io": io, "cpu": sum(ticks[p] for p in tree), "out": out, "since": now}
+try:
+    prev = json.load(open(state_path))
+    quiet = (prev["pids"] == cur["pids"] and prev["io"] == io and prev["out"] == out
+             and cur["cpu"] - prev["cpu"] <= 1 + 0.01 * os.sysconf("SC_CLK_TCK") * (now - prev["t"]))
+    if quiet:
+        cur["since"] = prev["since"]
+except Exception:
+    pass
+try:
+    tmp = "%s.%d" % (state_path, os.getpid())
+    json.dump(cur, open(tmp, "w"))
+    os.replace(tmp, state_path)
+except Exception:
+    sys.exit(NO)
+sys.exit(0 if now - cur["since"] >= limit else NO)
+PY
+}
+
+if [ "${1:-}" = __stalled ]; then stalled "${2:-}"; exit $?; fi
+
+if [ "${1:-}" = __watch ]; then  # the watcher: __watch <tab pid> <tty> <session pid>
+  tab=$2 tty=$3 me=$4 last=$(registry_name "$2") n=0 over="" lastover=""
   while kill -0 "$tab" 2>/dev/null; do
     sleep 1
+    n=$((n + 1))
     name=$(registry_name "$tab")
-    if [ "$name" != "$last" ]; then
-      last=$name
-      set_title "$tty" "$(cat "$RUN_DIR/$me.icon" 2>/dev/null || echo "$ICON_IDLE")" "$name"
+    icon=$(cat "$RUN_DIR/$me.icon" 2>/dev/null || echo "$ICON_IDLE")
+    if [ "$icon" = "$ICON_BACKGROUND" ]; then
+      if [ $((n % STALL_CHECK_SECS)) -eq 0 ]; then
+        if stalled "$me"; then over=1; else over=""; fi
+      fi
+    else
+      over=""
+    fi
+    if [ "$name" != "$last" ] || [ "$over" != "$lastover" ]; then
+      last=$name lastover=$over
+      [ -n "$over" ] && icon=$ICON_IDLE
+      set_title "$tty" "$icon" "$name"
     fi
   done
   rm -f "${RUN_DIR:?}/${tab:?}.watch"
@@ -174,13 +286,22 @@ esac
 mkdir -p "$RUN_DIR" 2>/dev/null
 printf '%s' "$icon" > "$RUN_DIR/$me.icon" 2>/dev/null
 [ "$state" = stop ] && printf '%s' "$input" > "$RUN_DIR/$me.stop.json" 2>/dev/null
-set_title "$tty" "$icon" "$name"
+shown=$icon
+# The same hung shell is in every later Stop payload: don't flash the hourglass until the next check.
+[ "$icon" = "$ICON_BACKGROUND" ] && stalled "$me" && shown=$ICON_IDLE
+set_title "$tty" "$shown" "$name"
 
 # One rename watcher per tab, started by whichever hook call comes first.
 # (Not `kill -0 0`: signal 0 to pid 0 is the caller's own process group and succeeds.)
-watcher=$(cat "$RUN_DIR/$tab.watch" 2>/dev/null)
+watcher="" wver=""
+{ read -r watcher wver < "$RUN_DIR/$tab.watch"; } 2>/dev/null
+if [ -n "$watcher" ] && [ "$wver" != "$WATCH_VERSION" ]; then
+  # A watcher running older code. Only if that pid still is one: the pid may have been reused.
+  grep -qa __watch "/proc/$watcher/cmdline" 2>/dev/null && kill "$watcher" 2>/dev/null
+  watcher=""
+fi
 if [ -z "$watcher" ] || ! kill -0 "$watcher" 2>/dev/null; then
   setsid bash "$0" __watch "$tab" "$tty" "$me" </dev/null >/dev/null 2>&1 &
-  echo $! > "$RUN_DIR/$tab.watch" 2>/dev/null
+  echo "$! $WATCH_VERSION" > "$RUN_DIR/$tab.watch" 2>/dev/null
 fi
 exit 0

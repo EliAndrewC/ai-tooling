@@ -25,7 +25,7 @@ host runs Linux with systemd user services, and some comments mention my own pro
 | `usage_cap.py` | status line, PreToolUse, PostToolUse, SessionEnd | Weekly soft cap per Claude account (wrap up, then refuse new work), per-goal caps, and the status line. |
 | `memwatch-hook.sh` | PostToolUse, UserPromptSubmit, Stop (`asyncRewake`) | Delivers memwatch/memguard events and wakes an idle session that has background work running. |
 | `missing-program-hook.sh` | PostToolUse(Failure) (Bash) | In a container, a "command not found" reminds the session it has passwordless sudo to install it. |
-| `tab-title.sh` | most events | Terminal tab title shows idle / busy / background / waiting on a prompt. |
+| `tab-title.sh` | most events | Terminal tab title shows idle / busy / background / waiting on a prompt. A background shell that has hung (silent for 30 minutes) stops counting as background work. |
 | `voice-mod-check.sh` | SessionStart | Warns when a session started without the voice-corrections mod. |
 
 Install: `hooks/install.sh` (it only rewrites files that differ, atomically) and merge
