@@ -63,7 +63,8 @@ sources, never by cutting DSK ones.
 7. **Capitalization follows the band's convention.** Titles are sentence case, because they're phrases
    someone might say ("Mattermost matters most", "Muddling along as we always have"). Proper nouns keep
    their capitals: named principles, departments, scales, problems ("The Inverse Conway Maneuver", "The
-   Worry Police", "The Leeroy Scale"). The doc is inconsistent, so judge each title. Inside a verb, the
+   Worry Police", "The Leeroy Scale"), and riffs on titled works ("An Immodest Proposal", after Swift's
+   "A Modest Proposal"). The doc is inconsistent, so judge each title. Inside a verb, the
    article goes lowercase: "Executing the Inverse Conway Maneuver".
 
 8. **A code identifier stays verbatim; add 'ing to the end instead of rewording.** "raise Hell" uses the
@@ -96,7 +97,7 @@ Rules for this source:
 - `extras` shows what the chosen categories add (`-v` lists the verbs).
 - To apply only the DSK verbs: `apply --no-extras`.
 
-As of 2026-11-25, the totals are 187 built-ins, 192 DSK and 237 extras from 12 categories: 616 in all,
+As of 2026-11-25, the totals are 187 built-ins, 189 DSK and 237 extras from 12 categories: 613 in all,
 or one DSK verb in 3.2.
 
 **Regression set (Eli's own verdicts).** Any rule change must still give these:
@@ -113,6 +114,7 @@ or one DSK verb in 3.2.
 | robusted | yes | Robusting (to make robust, not a coworker's name) |
 | raise Hell | yes | raise Hell'ing (Python keyword kept) |
 | un-twisted | yes | un-Twisted'ing (the Twisted framework) |
+| An Immodest Proposal | yes | Making an Immodest Proposal (riff on a titled work) |
 | crow, considered eaten | no | "considered harmful" riff, lost as a verb |
 | Refuriated beans | yes | Refuriating beans |
 | A suspiciously minor change | yes | Making a suspiciously minor change |
