@@ -20,7 +20,8 @@ it is logged in as (whose login token it holds - see _account; a container's .vo
 bills), and the account only picks which cap applies. Never fall back to another session's reading - a session at
 21% once read another account's 88% (2026-10-10). Known limit: a host session still on the old token right after a
 /login switch is labelled with the new account at its next redraw; only the cap NUMBER can be wrong for it. A reading
-updates when the status line redraws (after each message); idle, nothing redraws, but idle spends nothing.
+updates when the status line redraws (after each message, and every `statusLine.refreshInterval` seconds - 15, set
+2026-11-24 for the page-session segment, `_pages`); a redraw while idle carries the same reading, and idle spends nothing.
 
 Commands (the session runs these; CLAUDE_CODE_SESSION_ID names the session):
   cap                                         every account's soft cap and latest reading
@@ -237,8 +238,113 @@ def statusline(payload):
     ctx = (payload.get("context_window") or {}).get("used_percentage")
     if ctx is not None:
         parts.append(f"ctx {ctx:.0f}%")
+    pages = _pages(payload)
+    if pages:
+        parts.append(pages)
     line = " · ".join(parts)
     print(f"{acct['name']} · {line}" if acct else line)
+
+
+PAGES_QUIET = 300  # seconds without a write before a running page session reads QUIET
+PAGES_FORGET = 12 * 3600  # a queue silent this long is a dead runner's log, not shown
+
+
+def _mtime(path):
+    try:
+        return os.stat(path).st_mtime
+    except OSError:
+        return 0.0
+
+
+def _runner_alive(log):
+    """Whether the queue's runner (`l7r-gate page-session --work ... <run log>`) is a live process. WHY (2026-11-24): the
+    machine crashed under a queue and its log, which never got its `ALL DONE`, read QUIET for as long as anyone looked - quiet
+    and dead must not look alike. Asked only once a queue has been silent a minute; USAGE_CAP_PROC stands in for /proc in
+    the self-test. An unreadable /proc counts as alive, so a failure here never calls a working queue dead."""
+    proc = os.environ.get("USAGE_CAP_PROC") or "/proc"
+    try:
+        pids = [d for d in os.listdir(proc) if d.isdigit()]
+    except OSError:
+        return True
+    want = log.encode()
+    for pid in pids:
+        try:
+            with open(os.path.join(proc, pid, "cmdline"), "rb") as fh:
+                args = fh.read().split(b"\0")
+        except OSError:
+            continue
+        if b"--work" in args and want in args:
+            return True
+    return False
+
+
+def _pages(payload):
+    """The page-session segment (Eli, 2026-11-24): `make page-session` queues run as detached headless sessions the
+    interface cannot list, so a window waiting on one looked frozen. For a queue started in this session's repository that
+    has not ended: which brief is running and how long since that session (or a subagent of it) last wrote. Reads the
+    queue's run log (`.git/page-sessions/run-*.log`: started / ended / continued lines, `ALL DONE` at the end) and the
+    running session's transcript; needs `statusLine.refreshInterval`, since an idle window redraws on nothing else.
+    Never raises: any error shows no segment."""
+    try:
+        cwd = (payload.get("workspace") or {}).get("current_dir") or payload.get("cwd") or ""
+        if not cwd:
+            return None
+        root = cwd.split("/.git")[0]
+        while root != "/" and not os.path.isdir(os.path.join(root, ".git", "page-sessions")):
+            root = os.path.dirname(root)
+        pdir = os.path.join(root, ".git", "page-sessions")
+        if not os.path.isdir(pdir):
+            return None
+        projects = os.environ.get("USAGE_CAP_PROJECTS") or os.path.expanduser("~/.claude/projects")
+        tdir = os.path.join(projects, re.sub(r"[^A-Za-z0-9]", "-", root))
+        now, best = time.time(), None
+        for name in os.listdir(pdir):
+            if not (name.startswith("run-") and name.endswith(".log")):
+                continue
+            log = os.path.join(pdir, name)
+            with open(log, encoding="utf-8", errors="replace") as fh:
+                lines = fh.read().splitlines()
+            if not lines or any(ln.startswith(("ALL DONE", "STOPPED")) for ln in lines):
+                continue
+            brief, origin, sid, nth, running = {}, {}, None, 0, False
+            for ln in lines:
+                w = ln.split()
+                if w[0] == "started" and len(w) >= 3:
+                    sid, nth, running = w[1], nth + 1, True
+                    brief[sid] = w[2]
+                elif w[0] == "continued" and len(w) >= 4:
+                    origin[w[3]] = origin.get(w[1], w[1])
+                elif w[0] == "ended":
+                    running = False
+            if sid is None:
+                continue
+            last = max(_mtime(log), _mtime(os.path.join(tdir, sid + ".jsonl")))
+            sub = os.path.join(tdir, sid, "subagents")
+            if os.path.isdir(sub):
+                last = max([last] + [_mtime(os.path.join(sub, f)) for f in os.listdir(sub)])
+            if now - last > PAGES_FORGET:
+                continue
+            label = brief.get(origin.get(sid, sid), brief[sid])
+            label = os.path.basename(label)[:-3] if label.endswith(".md") else os.path.basename(label)
+            if sid in origin:
+                label += " (cont.)"
+            if best is None or last > best[0]:
+                best = (last, label, nth, running, log)
+        if best is None:
+            return None
+        last, label, nth, running, log = best
+        idle = max(0, int(now - last))
+        if idle >= 60 and not _runner_alive(log):
+            return f"pages #{nth} {label} · DEAD {idle // 60}m (its runner is gone: start it again)"
+        if idle >= PAGES_QUIET:
+            state = f"QUIET {idle // 60}m"
+        elif running:
+            state = f"active {idle}s ago" if idle < 60 else f"active {idle // 60}m ago"
+        else:
+            state = "between sessions"
+        return f"pages #{nth} {label} · {state}"
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------- hooks

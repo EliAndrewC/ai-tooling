@@ -159,5 +159,44 @@ check "unknown token, lookup fails: profile fallback" '^Alex · ' "$(tok)"
 # the 5-hour window is gone (2026-11): never shown, even if Claude Code still sends it
 check "no 5h segment" '^Eli · 7d 60% \(resets [^)]*\) · cap 90%$' "$(usage 60)"
 
+# the page-session segment (2026-11-24): a queue started in this session's repository, which brief is running and
+# how long since its session last wrote; nothing when no queue is live
+REPO=$(mktemp -d); PROJ=$(mktemp -d); trap 'rm -rf "$USAGE_CAP_DIR" "$ACCTS" "$REPO" "$PROJ"' EXIT
+mkdir -p "$REPO/.git/page-sessions" "$REPO/sub/dir"
+TDIR="$PROJ/$(printf %s "$REPO" | sed 's/[^A-Za-z0-9]/-/g')"; mkdir -p "$TDIR"
+pg() {  # [cwd] -> the status line for a session standing there
+  printf '{"session_id":"s1","workspace":{"current_dir":"%s"},"rate_limits":{"seven_day":{"used_percentage":60}}}' "${1:-$REPO}" \
+    | USAGE_CAP_PROJECTS="$PROJ" python3 "$TOOL" statusline
+}
+RUN="$REPO/.git/page-sessions/run-aaaa.log"
+# the runner's process, as /proc shows it: a queue silent a minute with no such process is DEAD, not QUIET
+FPROC=$(mktemp -d); trap 'rm -rf "$USAGE_CAP_DIR" "$ACCTS" "$REPO" "$PROJ" "$FPROC"' EXIT
+mkdir -p "$FPROC/4242" "$FPROC/self"; printf 'l7r-gate\0page-session\0--work\0%s\0name\0[]\0[]\0%s\0' "$REPO" "$RUN" >"$FPROC/4242/cmdline"
+export USAGE_CAP_PROC="$FPROC"
+check "no queue: no pages segment" 'cap 90%$' "$(pg)"
+printf 'started sidA s1-write.md\nended sidA rc=0\nALL DONE\n' >"$RUN"
+check "an ended queue: no pages segment" 'cap 90%$' "$(pg)"
+printf 'started sidA s1-write.md\n' >"$RUN"; : >"$TDIR/sidA.jsonl"
+check "a running session: active" 'pages #1 s1-write · active [0-9]+s ago$' "$(pg)"
+check "seen from a directory below the root" 'pages #1 s1-write · active' "$(pg "$REPO/sub/dir")"
+check "seen from inside .git" 'pages #1 s1-write · active' "$(pg "$REPO/.git/page-sessions")"
+check "another repository sees nothing" 'cap 90%$' "$(pg "$PROJ")"
+printf 'started sidA s1-write.md\nended sidA rc=0\ncontinued sidA -> sidB\nstarted sidB continue.md\n' >"$RUN"; : >"$TDIR/sidB.jsonl"
+check "a continuation names its first brief" 'pages #2 s1-write \(cont\.\) · active' "$(pg)"
+touch -d '9 minutes ago' "$RUN" "$TDIR/sidB.jsonl"
+check "no write for minutes: QUIET" 'pages #2 s1-write \(cont\.\) · QUIET 9m$' "$(pg)"
+rm "$FPROC/4242/cmdline"
+check "silent with its runner gone: DEAD" 'pages #2 s1-write \(cont\.\) · DEAD 9m \(its runner is gone' "$(pg)"
+check "an unreadable /proc never calls a queue dead" 'QUIET 9m$' "$(USAGE_CAP_PROC=/nonexistent pg)"
+printf 'l7r-gate\0page-session\0--work\0%s\0name\0[]\0[]\0%s\0' "$REPO" "$RUN" >"$FPROC/4242/cmdline"
+mkdir -p "$TDIR/sidB/subagents"; : >"$TDIR/sidB/subagents/agent-1.jsonl"
+check "a subagent's write counts as activity" 'pages #2 s1-write \(cont\.\) · active' "$(pg)"
+rm -r "$TDIR/sidB"; printf 'started sidA s1-write.md\nended sidA rc=0\n' >"$RUN"
+check "between two sessions" 'pages #1 s1-write · between sessions$' "$(pg)"
+touch -d '13 hours ago' "$RUN" "$TDIR/sidA.jsonl"
+check "a dead runner's log is forgotten" 'cap 90%$' "$(pg)"
+printf 'started sidA s1-write.md\nSTOPPED s2-write.md: over the cap\n' >"$RUN"
+check "a stopped queue: no pages segment" 'cap 90%$' "$(pg)"
+
 printf 'usage-cap self-test: %d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
