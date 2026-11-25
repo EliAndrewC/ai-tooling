@@ -1,0 +1,116 @@
+# spinner-verbs
+
+Turns a long-running office joke, a Google Doc listing a fake band's albums and songs, into extra
+Claude Code spinner verbs ("Making a suspiciously minor change…"). Claude Code's `spinnerVerbs` setting
+takes `{"mode": "append" | "replace", "verbs": [...]}`. `apply` always uses **append**, so the
+built-in verbs stay (187 in Claude Code 2.1.332).
+
+| File | What |
+|---|---|
+| `spinner-verbs.py` | `fetch` / `new` / `status` / `list` / `set` / `export` / `extras` / `apply` (run with `-h`) |
+| `verbs.json` | the public DSK list: only verbs with verdict `yes` (written by `export`) |
+| `extras.json` | categories pulled from another list (see "Extra verbs") |
+| `test-spinner-verbs.sh` | tests on a synthetic doc; ends `N passed, 0 failed` |
+
+The DSK doc is public by design (read-only to the world) and is the built-in default source.
+**Private state is never committed here.** `$SPINNER_VERBS_STATE` (default `~/.config/spinner-verbs/`)
+holds:
+- `config.json`: optional `{"doc": URL, "blocked_words": [coworker names]}`
+- `ledger.json`: every title ever seen, with verdict, verb and reason
+- `applied.json`: what `apply` last wrote, so a dropped verb gets removed
+
+They stay out of this repo: `config.json` lists coworker names, and only the chosen verbs belong in a
+public list. Test fixtures are synthetic for the same reason.
+
+## Updating the list (what a session does when asked)
+
+1. `./spinner-verbs.py new --record` lists titles still to review: new in the doc, or still
+   `unreviewed`. It adds the new ones to the ledger as `unreviewed`.
+2. Judge each one against the criteria below and record **every** title, album names included:
+   `set TITLE proposed-yes|proposed-maybe|proposed-no --verb "…" --why "…"`.
+3. Show Eli the proposed yes and maybe entries (`list --verdict proposed-yes`) as title → verb. His
+   answers become `set TITLE yes|no`. Never mark a title `yes` without him.
+4. Run `export`, then `apply --dry-run`, then `apply`. Commit `verbs.json` here.
+5. `status --check-doc` lists ledger titles no longer in the doc (renamed or removed). Ask whether a
+   renamed title keeps its verdict.
+
+Verdicts: `yes` / `no` are settled by Eli; `proposed-*` are a session's first pass.
+
+## What makes a good spinner verb
+
+A spinner verb is a waiting message: "the agent is currently ___". There's **no cap** on DSK verbs:
+every title that works goes in. The ratio to the built-ins is balanced by adding verbs from other
+sources, never by cutting DSK ones.
+
+1. **Most noun titles don't become verbs, unless there's an obvious verb version.** "The Crypt" →
+   "Crypting" captures nothing. "Blackberry is Dumb" is an opinion, not an activity.
+2. **Prefer the least change that keeps the title recognizable.** An existing gerund is best
+   ("Codifying workarounds"). Next comes an imperative turned gerund ("Finish Strong" → "Finishing
+   strong :)"). Next, one added verb with the whole title kept ("Making a suspiciously minor change").
+   If half the title has to go, it's a no.
+3. **It names something work, or the agent, does.** That covers real principles ("Applying the
+   Principle of Least Anger"), ones the team coined ("Exhibiting wise cowardice"), or self-contained
+   wordplay that needs no backstory ("Refuriating beans", "(Pew) Pew Pew'ing"). You don't need to know
+   the story behind a title to use it.
+4. **References are fine; a title that's only about life outside work isn't.** Card names, games and
+   pop culture are fair game ("Appropriately council-rooming" is the Dominion card; Pentavus, Leeroy
+   Jenkins, Dory). "I'm just like you, but I draw GOOD cards" is still a no: it's about the card game
+   itself, and the verb would drop most of the title.
+5. **Never a coworker's name.** The list is public. `config.json`'s `blocked_words` holds the names, and
+   `set` and `export` refuse a verb containing one.
+6. **Crude is fine ("damn", "ass", "testacular"); "shit" and "fuck" are not.** Both are built into the
+   tool's blocked words.
+7. **Capitalization follows the band's convention.** Titles are sentence case, because they're phrases
+   someone might say ("Mattermost matters most", "Muddling along as we always have"). Proper nouns keep
+   their capitals: named principles, departments, scales, problems ("The Inverse Conway Maneuver", "The
+   Worry Police", "The Leeroy Scale"). The doc is inconsistent, so judge each title. Inside a verb, the
+   article goes lowercase: "Executing the Inverse Conway Maneuver".
+
+Families (decided):
+- "Done, not X": **no**, all of them, including "Installed, not restarted" and "Documented, not working".
+- "Why don't you X about it?": **no**.
+- "X-driven development" → "Practicing X-driven development"
+- "Always Be X" → as-is when X is a gerund ("Always be mentoring")
+- "The X Problem" → "Solving the X Problem"
+- "X, considered Y" → "Considering X Y"
+
+## Extra verbs
+
+To keep the ratio around one DSK verb per 3–4 others, `apply` also adds verbs from
+github.com/wynandw87/claude-code-spinner-verbs. Only the category names chosen in `extras.json` are
+committed here. The verbs are **downloaded when `apply` runs, never copied into this repo**, because that
+repo has no license.
+
+Rules for this source:
+- Verb categories only. The "… Phrases" categories are sentences, and the tool refuses them.
+- Any entry that isn't a verb phrase is skipped with a warning.
+- The built-in profanity block applies. The coworker-name block applies only to DSK verbs ("Questioning
+  Larry" is a Lebowski character).
+- `extras` shows what the chosen categories add (`-v` lists the verbs).
+- To apply only the DSK verbs: `apply --no-extras`.
+
+As of 2026-11-25, the totals are 187 built-ins, 195 DSK and 237 extras from 12 categories: 619 in all,
+or one DSK verb in 3.2.
+
+**Regression set (Eli's own verdicts).** Any rule change must still give these:
+
+| Title | Verdict | Verb / reason |
+|---|---|---|
+| The Crypt | no | "Crypting" captures nothing |
+| (Pew) Pew Pew | yes | (Pew) Pew Pew'ing |
+| Principle of Least Anger | yes | Applying the Principle of Least Anger |
+| Blackberry is Dumb | no | an opinion, nothing to do |
+| Wise Cowardice | yes | Exhibiting wise cowardice |
+| I'm just like you, but I draw GOOD cards | no | about the game itself, and needs rewording |
+| Appropriately Council Roomed | yes | Appropriately council-rooming (references are fine) |
+| robusted | yes | Robusting (to make robust, not a coworker's name) |
+| Refuriated beans | yes | Refuriating beans |
+| A suspiciously minor change | yes | Making a suspiciously minor change |
+
+## Testing
+
+- `bash test-spinner-verbs.sh` should end `41 passed, 0 failed`.
+- Against the real doc, `./spinner-verbs.py fetch` prints every album with its track count. If the album
+  count doesn't match the doc's contents list, it fails and names the album it couldn't find. It warns
+  about any non-empty line it drops: today that's only one footnote line.
+- `apply --dry-run` shows the `+`/`-` changes to `settings.json` without writing.

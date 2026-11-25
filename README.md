@@ -13,6 +13,7 @@ host runs Linux with systemd user services, and some comments mention my own pro
 | `hooks/` | User-level Claude Code hooks (they run in every project), each with a test. `install.sh` copies them into `~/.claude/hooks/`, and `settings.example.json` has the `hooks` block for `~/.claude/settings.json`. |
 | `host-scripts/` | `launch-container.sh` (one podman dev container per repo, with `~/.claude` shared), the read-only `/host-scripts` mount plus a queue where containers *propose* host-script changes, a tmux-to-desktop clipboard bridge, read-only host diagnostics for containers, and the voice-corrections mod. |
 | `memwatch/` | `memwatch` (tells every Claude session about memory warnings and OOM kills in the containers' cgroup), memguard (kills the biggest non-Claude process when the containers thrash, then tells the session that owned it), and `cmem` (memory in use against the cap). |
+| `spinner-verbs/` | Turns a Google Doc of a fake band's song titles (an office running joke) into extra Claude Code spinner verbs: it finds titles not yet reviewed, applies written criteria for what makes a good verb, and appends the approved list (plus chosen categories from a public verb collection, downloaded at apply time) to `spinnerVerbs` in `settings.json`. |
 | `docs/` | Standalone write-ups, e.g. `bypass-prompt-timeout.md`. |
 
 ## The hooks
@@ -46,6 +47,7 @@ bash host-scripts/test-launch-container.sh      # fake podman, no container star
 bash host-scripts/test-proposals.sh
 bash host-scripts/test-clipboard-bridge.sh
 node host-scripts/voice-corrections/mod/hooks/test-corrector.mjs
+bash spinner-verbs/test-spinner-verbs.sh
 ```
 
 ## License
