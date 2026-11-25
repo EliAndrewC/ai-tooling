@@ -81,7 +81,7 @@ sources, never by cutting DSK ones.
    things right (a story point modifier)". A parenthetical that is its own sentence keeps its capital:
    "(Deal with it!)".
 
-**Principles from Eli's edits** (rounds 4–6; `lint` checks 1 and 4):
+**Principles from Eli's edits** (rounds 4–8; `lint` checks 1 and 4):
 1. **Keep the title's words and put a verb in front; don't turn its noun into a verb.** "Engaging the
    transcendental number pusher", not "Pushing transcendental numbers". "Jumping on the squashing
    band wagon". "Clicking 'I Understand the Risks'" (it's a button label). A verb that rewrites the
@@ -95,6 +95,14 @@ sources, never by cutting DSK ones.
    value sadding)".
 5. **The added verb has to fit the situation**: "Fixing 8 nested levels of 'never could have
    worked'", not "Writing".
+
+6. **A nounified verb is the joke; don't verb it back.** "Smooth Scrollie" is a scrolly that scrolls
+   smoothly. As a verb it collapses to "scrolling smoothly" and the joke is gone, so strike it.
+   (Different from principle 1: here the noun was made from a verb on purpose.)
+
+Glossary for judging titles: a **linger** is staying after stand-up to keep talking about something
+that came up in it. **Puppet** is the configuration-management tool. **Twisted** is the Python web
+framework.
 
 Families (decided):
 - "Done, not X": **no**, all of them, including "Installed, not restarted" and "Documented, not working".
@@ -119,8 +127,8 @@ Rules for this source:
 - `extras` shows what the chosen categories add (`-v` lists the verbs).
 - To apply only the DSK verbs: `apply --no-extras`.
 
-As of 2026-11-25, the totals are 187 built-ins, 183 DSK and 237 extras from 12 categories: 607 in all,
-or one DSK verb in 3.3.
+As of 2026-11-25, the totals are 187 built-ins, 219 DSK and 237 extras from 12 categories: 643 in all,
+or one DSK verb in 2.9.
 
 **Regression set (Eli's own verdicts).** Any rule change must still give these:
 
