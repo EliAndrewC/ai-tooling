@@ -128,16 +128,17 @@ Rules for this source:
 - Any entry that isn't a verb phrase is skipped with a warning. An entry counts as a verb phrase if it
   starts with an -ing verb, has one second after a modifier ("Not expecting the Spanish Inquisition"),
   or is a short phrase of three words or fewer ("Mr. Plowing"). A noun phrase that slips through goes in
-  `extras.json`'s `exclude` list ("Floating point double-cross").
-- Watch out for look-alike category names: "Detective / Noir" (11 short verbs) is not "Noir Detective"
-  (71 one-liners about code, 18 of them verbs). Both are in.
+  `extras.json`'s `exclude` list.
+- **Short verbs only.** Eli wants short verbs, not long phrases. Watch out for look-alike category
+  names: "Detective / Noir" (11 short verbs) is in. "Noir Detective" (71 one-liners about code, such as
+  "Following the stack trace downtown") is **not**.
 - The built-in profanity block applies. The coworker-name block applies only to DSK verbs ("Questioning
   Larry" is a Lebowski character).
 - `extras` shows what the chosen categories add (`-v` lists the verbs).
 - To apply only the DSK verbs: `apply --no-extras`.
 
-As of 2026-11-25, the totals are 187 built-ins, 244 DSK and 255 extras from 13 categories: 686 in all,
-or one DSK verb in 2.8.
+As of 2026-11-25, the totals are 187 built-ins, 244 DSK and 237 extras from 12 categories: 668 in all,
+or one DSK verb in 2.7.
 
 **Regression set (Eli's own verdicts).** Any rule change must still give these:
 
