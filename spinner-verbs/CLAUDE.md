@@ -81,7 +81,7 @@ sources, never by cutting DSK ones.
    things right (a story point modifier)". A parenthetical that is its own sentence keeps its capital:
    "(Deal with it!)".
 
-**Principles from Eli's edits** (rounds 4–8; `lint` checks 1 and 4):
+**Principles from Eli's edits** (rounds 4–9; `lint` checks 1, 4 and 7):
 1. **Keep the title's words and put a verb in front; don't turn its noun into a verb.** "Engaging the
    transcendental number pusher", not "Pushing transcendental numbers". "Jumping on the squashing
    band wagon". "Clicking 'I Understand the Risks'" (it's a button label). A verb that rewrites the
@@ -99,6 +99,10 @@ sources, never by cutting DSK ones.
 6. **A nounified verb is the joke; don't verb it back.** "Smooth Scrollie" is a scrolly that scrolls
    smoothly. As a verb it collapses to "scrolling smoothly" and the joke is gone, so strike it.
    (Different from principle 1: here the noun was made from a verb on purpose.)
+
+7. **The agent is the developer, so "you/your" said to the developer becomes I/my**: "Doing it 'in my
+   spare time'". A generic "you" ("sometimes you got to") and a your-mom joke stay as they are.
+   "We/our" stays too, because the agent is on the team. `lint` flags every you/your for a check.
 
 Glossary for judging titles: a **linger** is staying after stand-up to keep talking about something
 that came up in it. **Puppet** is the configuration-management tool. **Twisted** is the Python web
@@ -127,8 +131,8 @@ Rules for this source:
 - `extras` shows what the chosen categories add (`-v` lists the verbs).
 - To apply only the DSK verbs: `apply --no-extras`.
 
-As of 2026-11-25, the totals are 187 built-ins, 219 DSK and 237 extras from 12 categories: 643 in all,
-or one DSK verb in 2.9.
+As of 2026-11-25, the totals are 187 built-ins, 244 DSK and 237 extras from 12 categories: 668 in all,
+or one DSK verb in 2.7.
 
 **Regression set (Eli's own verdicts).** Any rule change must still give these:
 
@@ -151,7 +155,7 @@ or one DSK verb in 2.9.
 
 ## Testing
 
-- `bash test-spinner-verbs.sh` should end `47 passed, 0 failed`.
+- `bash test-spinner-verbs.sh` should end `48 passed, 0 failed`.
 - Against the real doc, `./spinner-verbs.py fetch` prints every album with its track count. If the album
   count doesn't match the doc's contents list, it fails and names the album it couldn't find. It warns
   about any non-empty line it drops: today that's only one footnote line.

@@ -365,6 +365,9 @@ def lint_entry(e):
     if reordered:
         out.append("title words reordered: a noun phrase turned into a verb (rule: keep the phrase, "
                    "put a verb in front)")
+    if re.search(r"\b(you|your|you're|yours)\b", verb, re.I):
+        out.append("contains you/your: if it's said to the developer, the agent is the developer, so use "
+                   "I/my ('Doing it \"in my spare time\"'); a generic you or a your-mom joke stays")
     tp = re.findall(r"\(([^)]*)\)", title)
     vp = re.findall(r"\(([^)]*)\)", verb)
     for a in tp:

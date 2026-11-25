@@ -177,6 +177,13 @@ check "lint flags a reordered noun phrase" '[[ "$out" == *"Neglecting glitches"*
 check "lint flags an agent noun made a verb" '[[ "$out" == *"agent noun '"'"'Pusher'"'"'"* ]]'
 check "lint flags dropped title words" '[[ "$out" == *"dropped: Boom, goes"* ]]'
 check "lint flags a lost parenthetical capital" '[[ "$out" == *"(deal with it!)"*"lost its capital"* ]]'
+python3 - "$SPINNER_VERBS_STATE/ledger.json" <<'PY'
+import json, sys; L = json.load(open(sys.argv[1]))
+L.append({"album": "x", "title": "In your spare time", "verdict": "yes", "verb": "Doing it in your spare time", "why": ""})
+json.dump(L, open(sys.argv[1], "w"))
+PY
+out="$(python3 "$SV" lint 2>&1)"
+check "lint flags you/your for the perspective rule" '[[ "$out" == *"in your spare time"*"contains you/your"* ]]'
 check "lint skips verbs Eli wrote" '[[ "$out" != *"Something else"* ]]'
 
 echo "$pass passed, $fail failed"
