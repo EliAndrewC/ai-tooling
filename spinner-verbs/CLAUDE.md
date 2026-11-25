@@ -49,13 +49,17 @@ rerun only removes verbs this tool added before.
    `unreviewed`. It adds the new ones to the ledger as `unreviewed`.
 2. Judge each one against the criteria below and record **every** title, album names included:
    `set TITLE proposed-yes|proposed-maybe|proposed-no --verb "…" --why "…"`.
-3. Run `lint`. It checks principles 1 and 4 below and flags verbs that reword the title, flip it from
-   a noun phrase into a verb, turn an agent noun into a verb, or lose punctuation or a parenthetical
-   capital. Fix each finding, or tell Eli why the exception is worth keeping. Verbs whose `why` starts
+3. Run `lint`. It checks principles 1, 4 and 7 below and flags verbs that reword the title, flip it from
+   a noun phrase into a verb, turn an agent noun into a verb, lose punctuation or a parenthetical
+   capital, or contain "you/your". Fix each finding, or tell Eli why the exception is worth keeping. Verbs whose `why` starts
    with "Eli" are his own wording, and lint skips them.
 4. Show Eli the proposed yes and maybe entries (`list --verdict proposed-yes`) as title → verb. His
    answers become `set TITLE yes|no`. Never mark a title `yes` without him.
-5. Run `export`, then `apply --dry-run`, then `apply`. Commit `verbs.json` here.
+5. Run `export`, then `apply --dry-run`, then `apply`. Update the totals line under "Extra verbs".
+   Commit and push `verbs.json` here (the public repo). On Eli's laptop, also commit and push the
+   private state: `~/.config/spinner-verbs` links to `~/this-laptop/docs/spinner-verbs/`. Add a
+   `LOG.md` line there too.
+   Report the new totals as a table: built-ins / DSK / extras, with per-category counts and percentages.
 6. `status --check-doc` lists ledger titles no longer in the doc (renamed or removed). Ask whether a
    renamed title keeps its verdict.
 
