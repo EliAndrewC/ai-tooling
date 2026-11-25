@@ -134,12 +134,15 @@ check "apply keeps the settings file mode" '[ "$(stat -c %a "$T/real-settings.js
 
 # extras: verb tables from another list, downloaded at apply time; phrases refused; non-verbs skipped.
 cat > "$T/extras-src.md" <<'EOF2'
-### Movie Things (3)
+### Movie Things (6)
 | Verb |
 |------|
 | Abiding |
 | Tying the room together |
 | The dude abides. |
+| Someone has been chasing this pointer for days |
+| Not expecting the Spanish Inquisition |
+| Not golfing |
 ### Movie Things Phrases (1)
 | Phrase |
 |---|
@@ -149,10 +152,12 @@ cat > "$T/extras-src.md" <<'EOF2'
 EOF2
 printf '{"source": "file://%s", "categories": ["Movie Things", "Other"]}' "$T/extras-src.md" > "$T/extras.json"
 out="$(python3 "$SV" extras --extras "$T/extras.json" 2>&1)"
-check "extras parses verbs, skips a sentence" '[[ "$out" == *"3 extra verbs from 2 categories"* && "$out" == *"skipped '"'"'The dude abides.'"'"'"* ]]'
+check "extras parses verbs, skips a sentence" '[[ "$out" == *"5 extra verbs from 2 categories"* && "$out" == *"skipped '"'"'Someone has been chasing"* && "$out" == *"skipped '"'"'The dude abides.'"'"'"* ]]'
 echo '{"verbs": ["Refuriating beans"]}' > "$T/dsk.json"
 python3 "$SV" apply --verbs "$T/dsk.json" --extras "$T/extras.json" --settings "$T/ex-settings.json" >/dev/null
-check "apply adds extras after DSK, deduped" '[ "$(python3 -c "import json;print(json.load(open(\"$T/ex-settings.json\"))[\"spinnerVerbs\"][\"verbs\"])")" = "['"'"'Refuriating beans'"'"', '"'"'Abiding'"'"', '"'"'Tying the room together'"'"']" ]'
+check "apply adds extras after DSK, deduped" '[ "$(python3 -c "import json;print(json.load(open(\"$T/ex-settings.json\"))[\"spinnerVerbs\"][\"verbs\"])")" = "['"'"'Refuriating beans'"'"', '"'"'Abiding'"'"', '"'"'Tying the room together'"'"', '"'"'Not expecting the Spanish Inquisition'"'"', '"'"'Not golfing'"'"']" ]'
+printf '{"source": "file://%s", "categories": ["Movie Things"], "exclude": ["not golfing"]}' "$T/extras-src.md" > "$T/extras-ex.json"
+check "extras exclude list drops an entry" '[[ "$(python3 "$SV" extras -v --extras "$T/extras-ex.json" 2>&1)" != *"Not golfing"* ]]'
 printf '{"source": "file://%s", "categories": ["Movie Things Phrases"]}' "$T/extras-src.md" > "$T/extras-bad.json"
 out="$(python3 "$SV" extras --extras "$T/extras-bad.json" 2>&1)"; rc=$?
 check "a phrases category is refused with the fix" '[ $rc -ne 0 ] && [[ "$out" == *"use the verb category"* ]]'

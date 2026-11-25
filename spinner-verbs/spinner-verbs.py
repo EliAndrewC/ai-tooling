@@ -408,6 +408,9 @@ def cmd_export(args):
 
 # ---------- extra verbs from another list ----------
 VERBISH = re.compile(r"(ing|in')$", re.I)
+# A gerund in second place counts ("Not expecting the Spanish Inquisition") unless the entry opens like a
+# sentence's subject ("I've been chasing...", "The build was...").
+SENTENCE_START = set("i i've i'm the this that a an she he we it they someone nobody every another two".split())
 
 
 def load_extras(path, text=None):
@@ -435,7 +438,7 @@ def load_extras(path, text=None):
             cell = line.strip().strip("|").strip()
             if cell and not re.fullmatch(r"[-: ]+|Verbs?|Phrases?|Entry", cell):
                 tables[cur].append(cell)
-    out = []
+    out, exclude = [], {x.casefold() for x in cfg.get("exclude", [])}
     for c in cfg["categories"]:
         if c.endswith("Phrases"):
             die(f"extras.json category {c!r} is a phrases list (sentences). fix: use the verb category, "
@@ -444,8 +447,17 @@ def load_extras(path, text=None):
             close = [t for t in tables if c.casefold().split()[0] in t.casefold()][:5]
             die(f"category {c!r} not found in {cfg['source']}. fix: use its exact heading; similar: {close}")
         for v in tables[c]:
-            if not any(VERBISH.search(w.strip(",.!?")) for w in v.split()) or v.rstrip()[-1:] in ".?":
+            words = [w.strip(",.!?\"'") for w in v.split()]
+            # A verb phrase starts with a gerund ("Grepping the streets for a clue"); a short one may lead
+            # with a modifier ("Not golfing", "Mr. Plowing"). "I've been chasing this pointer for days"
+            # contains a gerund but is a sentence.
+            lead = words[1:2] if words[0].casefold() not in SENTENCE_START else []
+            is_verb = (VERBISH.search(words[0]) or any(VERBISH.search(w) for w in lead) or
+                       (len(words) <= 3 and any(VERBISH.search(w) for w in words)))
+            if not is_verb or v.rstrip()[-1:] in ".?":
                 print(f"spinner-verbs: warning: skipped {v!r} ({c}): not a verb phrase", file=sys.stderr)
+            elif v.casefold() in exclude:
+                pass
             elif blocked_profanity(v):
                 print(f"spinner-verbs: warning: skipped {v!r} ({c}): blocked word", file=sys.stderr)
             else:
