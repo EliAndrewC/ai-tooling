@@ -168,7 +168,7 @@ or one DSK verb in 2.9.
 
 ## Testing
 
-- `bash test-spinner-verbs.sh` should end `52 passed, 0 failed`.
+- `bash test-spinner-verbs.sh` should end `53 passed, 0 failed`.
 - Against the real doc, `./spinner-verbs.py fetch` prints every album with its track count. If the album
   count doesn't match the doc's contents list, it fails and names the album it couldn't find. It warns
   about any non-empty line it drops: today that's only one footnote line.

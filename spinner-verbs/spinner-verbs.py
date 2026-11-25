@@ -457,6 +457,11 @@ def load_extras(path, text=None):
                       file=sys.stderr)
                 continue
             amap = {clean(k).casefold(): v for k, v in adaptations.get(c, {}).items() if k != "_status"}
+            if c not in adaptations:
+                print(f"spinner-verbs: note: skipped adapted category {c!r}: its rewordings are private "
+                      f"(none in {adaptations_path()}). Remove it from adapted_categories to silence this.",
+                      file=sys.stderr)
+                continue
             pending = 0
             for v in tables[c]:
                 if clean(v).casefold() not in amap:
@@ -530,8 +535,11 @@ def cmd_extras(args):
 
 def cmd_apply(args):
     try:
-        with open(args.verbs) as f:
-            verbs = json.load(f)["verbs"]
+        if args.no_dsk:
+            verbs = []
+        else:
+            with open(args.verbs) as f:
+                verbs = json.load(f)["verbs"]
     except FileNotFoundError:
         die(f"{args.verbs} does not exist. fix: run `spinner-verbs.py export` first (it writes the "
             "ledger's yes verbs there)")
@@ -611,6 +619,7 @@ def main():
     s = sub.add_parser("apply"); s.add_argument("--verbs", default=VERBS_FILE)
     s.add_argument("--extras", default=EXTRAS_FILE)
     s.add_argument("--no-extras", action="store_true", help="only the DSK verbs")
+    s.add_argument("--no-dsk", action="store_true", help="only the extra categories")
     s.add_argument("--settings", default=SETTINGS); s.add_argument("--dry-run", action="store_true")
     s.set_defaults(fn=cmd_apply)
     args = p.parse_args()

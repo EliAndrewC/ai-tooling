@@ -194,7 +194,10 @@ check "lint skips verbs Eli wrote" '[[ "$out" != *"Something else"* ]]'
 # Adapted categories: reworded entries come from the private adaptations file; proposed ones stay out.
 printf '{"source": "file://%s", "categories": ["Other"], "adapted_categories": ["Movie Things Phrases"]}' "$T/extras-src.md" > "$T/extras-ad.json"
 out="$(python3 "$SV" extras --extras "$T/extras-ad.json" 2>&1)"
-check "unadapted entries are pending, not added" '[[ "$out" == *"1 entries in adapted category"* && "$out" == *"1 extra verbs"* ]]'
+check "without private rewordings, an adapted category is skipped with a note" '[[ "$out" == *"rewordings are private"* && "$out" == *"1 extra verbs"* ]]'
+echo '{"Movie Things Phrases": {}}' > "$SPINNER_VERBS_STATE/adaptations.json"
+out="$(python3 "$SV" extras --extras "$T/extras-ad.json" 2>&1)"
+check "undecided entries are pending, not added" '[[ "$out" == *"1 entries in adapted category"* && "$out" == *"1 extra verbs"* ]]'
 echo '{"Movie Things Phrases": {"_status": "proposed", "This aggression will not stand": "Not letting this aggression stand"}}' > "$SPINNER_VERBS_STATE/adaptations.json"
 out="$(python3 "$SV" extras -v --extras "$T/extras-ad.json" 2>&1)"
 check "a proposed adapted category stays out" '[[ "$out" == *"still proposed"* && "$out" != *"Not letting"* ]]'
