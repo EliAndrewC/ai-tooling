@@ -69,7 +69,10 @@ sources, never by cutting DSK ones.
 
 8. **A code identifier stays verbatim; add 'ing to the end instead of rewording.** "raise Hell" uses the
    Python keyword, so it becomes "raise Hell'ing", not "Raising hell". "un-twisted" means the Twisted
-   framework, so it becomes "un-Twisted'ing". (Pew) Pew Pew'ing follows the same pattern.
+   framework, so it becomes "un-Twisted'ing". A pun on a name works the same way: "Martin Luther
+   Ping'ing", not "Martin Luther pinging". (Pew) Pew Pew'ing follows the same pattern.
+   A noun that names a thing keeps its noun and gets a verb in front: "Engaging the transcendental
+   number pusher", "Jumping on the squashing band wagon".
 9. **Keep the title's own voice.** Edit a parenthetical only enough to read as part of the verb: "Doing
    things right (a story point modifier)". A parenthetical that is its own sentence keeps its capital:
    "(Deal with it!)".
@@ -78,7 +81,7 @@ Families (decided):
 - "Done, not X": **no**, all of them, including "Installed, not restarted" and "Documented, not working".
 - "Why don't you X about it?": **no**.
 - "X-driven development" → "Practicing X-driven development"
-- "Always Be X" → as-is when X is a gerund ("Always be mentoring")
+- "Always Be X": **no**, all of them.
 - "The X Problem" → "Solving the X Problem"
 - "X, considered Y": **no**. It riffs on "X considered harmful", and the verb form loses the reference.
 
@@ -97,8 +100,8 @@ Rules for this source:
 - `extras` shows what the chosen categories add (`-v` lists the verbs).
 - To apply only the DSK verbs: `apply --no-extras`.
 
-As of 2026-11-25, the totals are 187 built-ins, 189 DSK and 237 extras from 12 categories: 613 in all,
-or one DSK verb in 3.2.
+As of 2026-11-25, the totals are 187 built-ins, 184 DSK and 237 extras from 12 categories: 608 in all,
+or one DSK verb in 3.3.
 
 **Regression set (Eli's own verdicts).** Any rule change must still give these:
 
