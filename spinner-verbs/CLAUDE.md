@@ -28,10 +28,14 @@ public list. Test fixtures are synthetic for the same reason.
    `unreviewed`. It adds the new ones to the ledger as `unreviewed`.
 2. Judge each one against the criteria below and record **every** title, album names included:
    `set TITLE proposed-yes|proposed-maybe|proposed-no --verb "…" --why "…"`.
-3. Show Eli the proposed yes and maybe entries (`list --verdict proposed-yes`) as title → verb. His
+3. Run `lint`. It checks principles 1 and 4 below and flags verbs that reword the title, flip it from
+   a noun phrase into a verb, turn an agent noun into a verb, or lose punctuation or a parenthetical
+   capital. Fix each finding, or tell Eli why the exception is worth keeping. Verbs whose `why` starts
+   with "Eli" are his own wording, and lint skips them.
+4. Show Eli the proposed yes and maybe entries (`list --verdict proposed-yes`) as title → verb. His
    answers become `set TITLE yes|no`. Never mark a title `yes` without him.
-4. Run `export`, then `apply --dry-run`, then `apply`. Commit `verbs.json` here.
-5. `status --check-doc` lists ledger titles no longer in the doc (renamed or removed). Ask whether a
+5. Run `export`, then `apply --dry-run`, then `apply`. Commit `verbs.json` here.
+6. `status --check-doc` lists ledger titles no longer in the doc (renamed or removed). Ask whether a
    renamed title keeps its verdict.
 
 Verdicts: `yes` / `no` are settled by Eli; `proposed-*` are a session's first pass.
@@ -76,6 +80,21 @@ sources, never by cutting DSK ones.
 9. **Keep the title's own voice.** Edit a parenthetical only enough to read as part of the verb: "Doing
    things right (a story point modifier)". A parenthetical that is its own sentence keeps its capital:
    "(Deal with it!)".
+
+**Principles from Eli's edits** (rounds 4–6; `lint` checks 1 and 4):
+1. **Keep the title's words and put a verb in front; don't turn its noun into a verb.** "Engaging the
+   transcendental number pusher", not "Pushing transcendental numbers". "Jumping on the squashing
+   band wagon". "Clicking 'I Understand the Risks'" (it's a button label). A verb that rewrites the
+   title gets struck ("Swinging the JIRA sledgehammer").
+2. **Names, identifiers and puns on names stay exactly as written, with 'ing added** (rule 8 above).
+3. **A riff on a famous phrase is struck if the verb form breaks it** ("considered harmful", "Always Be
+   Closing", "Don't Not Decline"). It stays if a verb in front keeps it intact ("Making an Immodest
+   Proposal").
+4. **Punctuation is part of the joke.** Keep "(!)", "...", "**…**", and a parenthetical's capital when
+   the parenthetical is its own sentence. A parallel joke stays parallel: "Value adding (more like
+   value sadding)".
+5. **The added verb has to fit the situation**: "Fixing 8 nested levels of 'never could have
+   worked'", not "Writing".
 
 Families (decided):
 - "Done, not X": **no**, all of them, including "Installed, not restarted" and "Documented, not working".
@@ -124,7 +143,7 @@ or one DSK verb in 3.3.
 
 ## Testing
 
-- `bash test-spinner-verbs.sh` should end `41 passed, 0 failed`.
+- `bash test-spinner-verbs.sh` should end `47 passed, 0 failed`.
 - Against the real doc, `./spinner-verbs.py fetch` prints every album with its track count. If the album
   count doesn't match the doc's contents list, it fails and names the album it couldn't find. It warns
   about any non-empty line it drops: today that's only one footnote line.

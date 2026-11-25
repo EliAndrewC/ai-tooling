@@ -12,6 +12,7 @@ verbs marked yes are exported to a public list, and `apply` appends that list to
   spinner-verbs.py status       ledger counts by verdict, plus renamed/removed titles
   spinner-verbs.py list         ledger entries (--verdict V), as title -> verb
   spinner-verbs.py set TITLE V  record a verdict (TITLE: unique case-insensitive substring)
+  spinner-verbs.py lint         flag verbs that reword the title or lose its punctuation (CLAUDE.md rules)
   spinner-verbs.py export       write the public verbs file from the ledger's "yes" entries
   spinner-verbs.py extras       the verbs extras.json's categories add (downloaded, not stored here)
   spinner-verbs.py apply        merge the DSK verbs + extras into ~/.claude/settings.json (append mode)
@@ -310,6 +311,88 @@ def cmd_set(args):
     print(f"{hits[0]['title']}: {args.verdict}  ->  {hits[0].get('verb') or '-'}")
 
 
+# Subject/filler words a verb may drop ("We're doing it" -> "Doing it"); everything else should survive.
+DROPPABLE = set("""a an the and of to in on for with at by is are be it its it's i i'm me my we we're
+our you your let just gotta all""".split())
+WORD = re.compile(r"[A-Za-z0-9]+(?:'[A-Za-z]+)?")
+
+
+IRREGULAR = {"doing": "do", "does": "do", "done": "do", "going": "go", "goes": "go", "being": "be",
+             "taking": "tak", "taken": "tak", "made": "mak", "forgotten": "forget"}
+
+
+def stem(w):
+    """Crude stem so inflections match: Making/Make, Refuriated/Refuriating, Hell'ing/Hell, Diffs/Diffing."""
+    w = w.casefold().replace("'ing", "").replace("'", "")
+    if w in IRREGULAR:
+        return IRREGULAR[w]
+    for suf, rep in (("ying", "y"), ("ied", "y"), ("ing", ""), ("ed", ""), ("es", ""), ("s", ""), ("e", "")):
+        if w.endswith(suf) and len(w) - len(suf) >= 3:
+            return w[: -len(suf)] + rep
+    return w
+
+
+def kept(word, vstems):
+    s = stem(word)
+    return any(s == v or (min(len(s), len(v)) >= 3 and (s.startswith(v) or v.startswith(s))) for v in vstems)
+
+
+def lint_entry(e):
+    """Problems with a verb, by the CLAUDE.md rules Eli's edits established."""
+    title, verb, out = clean(e["title"]), clean(e.get("verb") or ""), []
+    vstems = {stem(w) for w in WORD.findall(verb)}
+    lost = [w for w in WORD.findall(title) if w.casefold() not in DROPPABLE and not kept(w, vstems)]
+    if lost:
+        out.append(f"title words reworded or dropped: {', '.join(lost)} (rule: keep the title's words, "
+                   "put a verb in front)")
+    vexact = {w.casefold() for w in WORD.findall(verb)}
+    for w in WORD.findall(title):
+        ing = {stem(v) for v in WORD.findall(verb) if v.casefold().endswith(("ing", "'ing"))}
+        if re.search(r"[a-z](er|or)$", w, re.I) and w.casefold() not in vexact and kept(w, ing):
+            out.append(f"agent noun {w!r} turned into a verb (rule: keep the noun, put a verb in front, "
+                       "like 'Engaging the transcendental number pusher')")
+    content = [stem(w) for w in WORD.findall(title) if w.casefold() not in DROPPABLE]
+    vorder = [stem(w) for w in WORD.findall(verb)]
+    def same(c, v):
+        return c == v or (min(len(c), len(v)) >= 3 and (c.startswith(v) or v.startswith(c)))
+    last, reordered = -1, False
+    for c in content:  # each title word must appear after the previous one; earlier-only = reordered
+        nxt = next((i for i in range(last + 1, len(vorder)) if same(c, vorder[i])), None)
+        if nxt is not None:
+            last = nxt
+        elif any(same(c, v) for v in vorder):
+            reordered = True
+    if reordered:
+        out.append("title words reordered: a noun phrase turned into a verb (rule: keep the phrase, "
+                   "put a verb in front)")
+    tp = re.findall(r"\(([^)]*)\)", title)
+    vp = re.findall(r"\(([^)]*)\)", verb)
+    for a in tp:
+        match = next((b for b in vp if b.casefold() == a.casefold()), None)
+        if match is not None and a[:1].isupper() and match[:1].islower():
+            out.append(f"parenthetical lost its capital: ({match}) (rule: its own sentence keeps it)")
+    for mark in ("!", "?", "...", ":)", "*"):
+        if mark in title and mark not in verb:
+            out.append(f"lost {mark!r} from the title (rule: punctuation is part of the joke)")
+    return out
+
+
+def cmd_lint(args):
+    n = 0
+    for e in load_ledger():
+        if e.get("verdict") not in ("yes", "proposed-yes", "proposed-maybe") and not args.all:
+            continue
+        if not e.get("verb"):
+            continue
+        # A verb Eli wrote or edited himself is settled, even where it breaks a rule on purpose.
+        if (e.get("why") or "").startswith("Eli") and not args.all:
+            continue
+        for problem in lint_entry(e):
+            n += 1
+            print(f"{e['title']}  ->  {e['verb']}\n    {problem}")
+    print(f"{n} lint findings", file=sys.stderr)
+
+
 def cmd_export(args):
     verbs = verbs_from_ledger(load_ledger(), args.include_proposed)
     bad = [(v, blocked(v)) for v in verbs if blocked(v)]
@@ -452,6 +535,8 @@ def main():
     s = sub.add_parser("set"); s.add_argument("title"); s.add_argument("verdict", choices=VERDICTS)
     s.add_argument("--verb"); s.add_argument("--why")
     s.set_defaults(fn=cmd_set)
+    s = sub.add_parser("lint"); s.add_argument("--all", action="store_true", help="include no's and verbs Eli wrote himself")
+    s.set_defaults(fn=cmd_lint)
     s = sub.add_parser("export"); s.add_argument("--out", default=VERBS_FILE)
     s.add_argument("--include-proposed", action="store_true", help="preview: count proposed-yes too")
     s.set_defaults(fn=cmd_export)

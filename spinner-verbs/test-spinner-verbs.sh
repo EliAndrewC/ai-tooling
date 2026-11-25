@@ -160,5 +160,24 @@ printf '{"source": "file://%s", "categories": ["Movie Thingz"]}' "$T/extras-src.
 out="$(python3 "$SV" extras --extras "$T/extras-bad.json" 2>&1)"; rc=$?
 check "an unknown category is refused, naming close ones" '[ $rc -ne 0 ] && [[ "$out" == *"not found"* && "$out" == *"Movie Things"* ]]'
 
+# lint: Eli's edit rules. Inflections pass; rewording, reordering, agent nouns, lost capitals flag.
+cat > "$SPINNER_VERBS_STATE/ledger.json" <<'EOF2'
+[{"album": "x", "title": "Make it Tso", "verdict": "yes", "verb": "Making it Tso", "why": ""},
+ {"album": "x", "title": "Refuriated beans", "verdict": "yes", "verb": "Refuriating beans", "why": ""},
+ {"album": "x", "title": "Do the Google Thing", "verdict": "yes", "verb": "Doing the Google thing", "why": ""},
+ {"album": "x", "title": "Glitch neglect", "verdict": "yes", "verb": "Neglecting glitches", "why": ""},
+ {"album": "x", "title": "Transcendental Number Pusher", "verdict": "yes", "verb": "Pushing transcendental numbers", "why": ""},
+ {"album": "x", "title": "Boom goes the JIRA sledgehammer", "verdict": "yes", "verb": "Swinging the JIRA sledgehammer", "why": ""},
+ {"album": "x", "title": "Better off (Deal with it!)", "verdict": "yes", "verb": "Being better off (deal with it!)", "why": ""},
+ {"album": "x", "title": "Value Add", "verdict": "yes", "verb": "Something else entirely", "why": "Eli's edit"}]
+EOF2
+out="$(python3 "$SV" lint 2>&1)"
+check "lint passes inflections" '[[ "$out" != *"Making it Tso"* && "$out" != *"Refuriating"* && "$out" != *"Google"* ]]'
+check "lint flags a reordered noun phrase" '[[ "$out" == *"Neglecting glitches"*"reordered"* ]]'
+check "lint flags an agent noun made a verb" '[[ "$out" == *"agent noun '"'"'Pusher'"'"'"* ]]'
+check "lint flags dropped title words" '[[ "$out" == *"dropped: Boom, goes"* ]]'
+check "lint flags a lost parenthetical capital" '[[ "$out" == *"(deal with it!)"*"lost its capital"* ]]'
+check "lint skips verbs Eli wrote" '[[ "$out" != *"Something else"* ]]'
+
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]
