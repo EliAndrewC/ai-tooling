@@ -22,6 +22,27 @@ holds:
 They stay out of this repo: `config.json` lists coworker names, and only the chosen verbs belong in a
 public list. Test fixtures are synthetic for the same reason.
 
+## Using this yourself (someone other than the maintainer)
+
+`apply` **appends** to the built-in verbs and never replaces them. It keeps the other settings, and a
+rerun only removes verbs this tool added before.
+
+```sh
+./spinner-verbs.py apply --dry-run   # show what would change in ~/.claude/settings.json
+./spinner-verbs.py apply             # band verbs + extra categories
+./spinner-verbs.py apply --no-dsk    # only the extra categories
+./spinner-verbs.py apply --no-extras # only the band verbs
+./spinner-verbs.py extras -v         # list the extra categories' verbs
+```
+
+- **Choosing categories:** edit `categories` in `extras.json` using the exact headings from the source
+  repo's README. Use the short-verb categories: the tool refuses the "… Phrases" ones, which are
+  sentences.
+- **Noir Detective** is an adapted category whose rewordings are private (see "Extra verbs"). Without
+  them it's skipped with a note. Remove it from `adapted_categories` to silence the note.
+- **Your own list of titles:** `fetch` / `new` / `lint` work on any Google Doc laid out the same way
+  (a contents list, then one table per album). Pass `--doc URL`, then follow the workflow below.
+
 ## Updating the list (what a session does when asked)
 
 1. `./spinner-verbs.py new --record` lists titles still to review: new in the doc, or still

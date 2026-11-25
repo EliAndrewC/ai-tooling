@@ -41,39 +41,12 @@ out of `~/.claude` would dangle inside them. And a hook script must never be mis
 
 ## Spinner verbs
 
-`spinner-verbs/` adds to the spinner text Claude Code shows while it works ("Making a suspiciously
-minor change…"). It **appends** to the built-in verbs and never replaces them. It keeps your other
-settings, and a rerun only removes verbs it added itself.
-
-```sh
-spinner-verbs/spinner-verbs.py apply --dry-run   # show what would change in ~/.claude/settings.json
-spinner-verbs/spinner-verbs.py apply             # the band verbs + the extra categories
-spinner-verbs/spinner-verbs.py apply --no-dsk    # only the extra categories
-spinner-verbs/spinner-verbs.py apply --no-extras # only the band verbs
-spinner-verbs/spinner-verbs.py extras -v         # list the extra categories' verbs
-```
-
-There are two sources:
-
-- **`verbs.json`**: the band verbs. They come from the song titles of Differently Sized Kittens, a fake
-  band that's been a running joke at work for 15+ years ([the discography][dsk]). Each title was
-  reviewed by hand against the criteria in `spinner-verbs/CLAUDE.md`.
-- **`extras.json`**: themed categories from
-  [wynandw87/claude-code-spinner-verbs](https://github.com/wynandw87/claude-code-spinner-verbs), with
-  thanks. To choose your own, edit `categories` using the exact headings from that repo's README.
-  Use the short-verb categories, not the "… Phrases" ones, which are sentences and which the tool
-  refuses. That repo has no license, so its verbs are **downloaded when you run `apply`**, never
-  copied here.
-
-One category, Noir Detective, mixes verbs with sentences, so the maintainer rewrote its entries by
-hand. Those rewordings are private (derived from an unlicensed list), so without them the tool skips
-that category with a note.
-
-To turn your own list of titles into verbs, `fetch` / `new` / `lint` work on any Google Doc laid out
-the same way. Pass `--doc URL`, and see `spinner-verbs/CLAUDE.md` for the review workflow and the
-principles behind a good spinner verb.
-
-[dsk]: https://docs.google.com/document/d/1kO6DRPxsuS4XvP8sjDwwgcAjuVuv5-oIGPIxuguu_Zc
+`spinner-verbs/` adds a few hundred extra lines to the spinner Claude Code shows while it works ("Making a
+suspiciously minor change…"), on top of the built-in ones. The extras come from the song titles of
+Differently Sized Kittens, a fake band that's been a running joke at my work for 15+ years, and from
+themed categories in
+[wynandw87/claude-code-spinner-verbs](https://github.com/wynandw87/claude-code-spinner-verbs) (thanks!).
+You can choose which categories to use. `spinner-verbs/CLAUDE.md` covers how.
 
 ## Tests
 
