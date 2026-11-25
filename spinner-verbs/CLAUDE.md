@@ -129,7 +129,9 @@ Rules for this source:
   starts with an -ing verb, has one second after a modifier ("Not expecting the Spanish Inquisition"),
   or is a short phrase of three words or fewer ("Mr. Plowing"). A noun phrase that slips through goes in
   `extras.json`'s `exclude` list.
-- **Short verbs only.** Eli wants short verbs, not long phrases. Watch out for look-alike category
+- **Short verbs only, judged by category.** Eli picks the short-verb categories and approves each one as
+  a whole, so there's no per-entry review and no word cap. "Waiting at the bus stop with Totoro" is
+  fine because it comes from a short-verb category. Eli doesn't want the long-phrase categories. Watch out for look-alike category
   names: "Detective / Noir" (11 short verbs) is in. "Noir Detective" (71 one-liners about code, such as
   "Following the stack trace downtown") is **not**.
 - The built-in profanity block applies. The coworker-name block applies only to DSK verbs ("Questioning
