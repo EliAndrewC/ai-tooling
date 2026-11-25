@@ -4,6 +4,8 @@
 # caches the kernel frees on demand; mapped program code counts as in use), so
 # "left before warning" matches when sessions get the LOW MEMORY WARNING. Also shows the laptop's
 # own free RAM, since the containers can't use more than the host has. No root needed.
+# Disk section: live df, plus per-container sizes and their 1 h / 1 day change from cdisk-scan.sh's
+# cache (user timer cdisk-scan.timer; a live du of a big container layer takes minutes).
 #   cmem                   one snapshot
 #   cmem --watch [SECS]    refresh every SECS s (default 10; -w works too), Ctrl-C to stop.
 #                          The terminal's title is "cmem" meanwhile and goes back afterwards.
@@ -86,4 +88,47 @@ echo "Laptop"
 printf "  %-20s %s GB of %s GB   (free + file cache)\n" "available" "$(gb "$host_avail")" "$(gb "$host_total")"
 if [ -n "$cap" ] && (( host_avail < left )); then
   echo "  NOTE: the host has less free than the containers' cap allows; host RAM is the real limit."
+fi
+
+# Disk: live df for the totals; per-container sizes from cdisk-scan's cache (a live du takes minutes).
+STORAGE="${CDISK_STORAGE:-$HOME/.local/share/containers/storage}"
+HIST="${CDISK_HISTORY:-$HOME/.cache/cmem/disk-history.tsv}"
+read -r d_size d_used d_avail < <(df --block-size=1M --output=size,used,avail "$STORAGE" | tail -1)
+echo
+awk -v s="$d_size" -v u="$d_used" -v a="$d_avail" 'BEGIN{
+  printf "Disk (%.0f GB)\n  %-31s %5.1f GB used, %.1f GB free (%.0f%% free)\n", s/1024, "laptop", u/1024, a/1024, 100*a/(u+a) }'
+if [ ! -s "$HIST" ]; then
+  echo "  (no per-container figures yet: the cdisk-scan timer writes them hourly."
+  echo "   Run one now: systemctl --user start cdisk-scan; not installed? see ~/ai-tooling/memwatch/CLAUDE.md)"
+else
+  awk -F'\t' -v now="$(date +%s)" -v used="$d_used" '
+    function delta(have, k) {  # have: 1 = vs the ~1 h scan, 2 = vs the ~1 day scan
+      if (have == 1 && h && (k in ph)) return sprintf("%+8.1f", (cur[k] - ph[k]) / 1024)
+      if (have == 2 && d && (k in pd)) return sprintf("%+8.1f", (cur[k] - pd[k]) / 1024)
+      return sprintf("%8s", "-")
+    }
+    function row(label, k) { printf "  %-31s %8.1f %s %s\n", label, cur[k] / 1024, delta(1, k), delta(2, k) }
+    { ts[NR] = $1; nm[NR] = $2; mb[NR] = $3; if ($1 > L) L = $1 }
+    END {
+      h = 0; d = 0  # reference scans: the newest at least ~1 h / ~1 day before the latest
+      for (i = 1; i <= NR; i++) {
+        if (ts[i] <= L - 3300 && ts[i] > h) h = ts[i]
+        if (ts[i] <= L - 85000 && ts[i] > d) d = ts[i]
+      }
+      for (i = 1; i <= NR; i++) {
+        if (ts[i] == L) { cur[nm[i]] = mb[i]; if (nm[i] !~ /^_/) order[++n] = nm[i] }
+        if (h && ts[i] == h) ph[nm[i]] = mb[i]
+        if (d && ts[i] == d) pd[nm[i]] = mb[i]
+      }
+      printf "  %-31s %8s %8s %8s\n", "containers (scanned " int((now - L) / 60) " min ago)", "GB", "1 h", "1 day"
+      for (i = 1; i <= n; i++) for (j = i + 1; j <= n; j++)  # biggest first
+        if (cur[order[j]] > cur[order[i]]) { t = order[i]; order[i] = order[j]; order[j] = t }
+      for (i = 1; i <= n; i++) { row("  " order[i], order[i]); pod += cur[order[i]] }
+      row("images + unused old layers", "_images"); pod += cur["_images"]
+      printf "  %-31s %8.1f   (your files, repos the containers mount, system)\n", "everything else", (used - pod) / 1024
+    }
+  ' "$HIST"
+fi
+if (( d_avail * 10 < d_size )); then
+  echo "  NOTE: under 10% of the disk is free. What to clean, biggest first: ~/this-laptop/docs/disk/CLAUDE.md"
 fi

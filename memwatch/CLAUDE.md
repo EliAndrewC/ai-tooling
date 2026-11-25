@@ -1,16 +1,18 @@
 # memwatch, memguard, cmem: Claude dev containers and memory
 
 Load this file when: a session was told about a memory warning or an OOM kill, memguard killed something,
-you want to know how much of the containers' memory cap is in use, or you're changing any of these.
+you want to know how much of the containers' memory cap is in use or how much disk each container takes,
+or you're changing any of these.
 
 The dev containers (started by `launch-container`, `host-scripts/launch-container.sh`) share one memory
 limit, the user-level `claude-containers.slice` (see the launcher's header for its numbers). These tools
 watch that slice. Files: `memwatch-events.sh` (producer, user service `memwatch`, unit `memwatch.service`
 here), `memlib.sh` (the shared "memory in use" measure), `memguard.py` (the kill), `cmem.sh` (on PATH as
-`cmem`), and the consumer hook `hooks/memwatch-hook.sh` (installed by `hooks/install.sh`).
+`cmem`), `cdisk-scan.sh` (per-container disk sizes for `cmem`, user timer `cdisk-scan.timer`), and the consumer hook `hooks/memwatch-hook.sh` (installed by `hooks/install.sh`).
 
 Install: `cp memwatch/memwatch.service ~/.config/systemd/user/ && systemctl --user daemon-reload &&
-systemctl --user enable --now memwatch`, then wire `memwatch-hook.sh` as in `hooks/settings.example.json`.
+systemctl --user enable --now memwatch`; for cmem's disk figures `cp memwatch/cdisk-scan.{service,timer}
+~/.config/systemd/user/ && systemctl --user daemon-reload && systemctl --user enable --now cdisk-scan.timer`; then wire `memwatch-hook.sh` as in `hooks/settings.example.json`.
 
 ## `cmem`: how much of the container cap is in use (2026-10-01)
 
@@ -20,6 +22,31 @@ on demand) + unused = cap, and prints AVAILABLE = unused + caches (and how much 
 the memwatch warning), plus the laptop's `MemAvailable` (free + droppable file cache; excludes tmpfs/shmem). The figures are rounded so the column adds up. Use it before starting another container session. `cmem --watch` (or `-w`) refreshes every 10 s, `cmem --watch 3` every 3 s; the terminal title reads `cmem` while it runs and is restored on Ctrl-C (xterm title stack, which gnome-terminal supports).
 htop can't show this split: it only shows the whole laptop. If the laptop has less available than
 the containers have left, the laptop's RAM is the real limit, and `cmem` says so.
+
+## `cmem` Disk section and `cdisk-scan` (2026-11-25)
+
+`cmem` also prints the disk: live `df` (used, free, % free), each container's writable layer (what it wrote
+outside its bind mounts: `/tmp`, `~/.cache`, build caches) with its change over ~1 h and ~1 day, "images +
+unused old layers", and "everything else" (host files, the repos containers mount, system). Under 10% free
+it prints a NOTE. Per-container sizes come from `cdisk-scan.sh`'s cache, `~/.cache/cmem/disk-history.tsv`
+(`<epoch> TAB <name> TAB <MB>`, 8 days kept; `_images`, `_used`), because a live `du` of a 200 GB layer
+takes 2-4 min. The figures for a container you just stopped linger until the next scan.
+
+The scan must never be what slows the laptop (its freezes are disk stalls). So: hourly; idle I/O class +
+nice 19 + `IOWeight=10`/`CPUWeight=10` like `claude.slice` (idle class only works because the NVMe scheduler
+is bfq, set by this-laptop's `fix-memory-priority.sh`; under `none` it does nothing); skips when PSI io
+"full" avg60 >= 5%; SIGSTOPs its own `du` while io full avg10 >= 5% and resumes below 2.5%; gives up after
+30 min keeping the last figures. Tunables: `CDISK_SKIP_FULL`, `CDISK_PAUSE_FULL`, `CDISK_MAX_SECS`,
+`CDISK_HISTORY`, `CDISK_STORAGE`. Don't match `du` by command line to pause or kill it: two scans (timer +
+manual) run the same line, and the 2026-11-25 test killed the timer's scan that way; `dupids()` walks this
+scan's own process tree.
+
+- **Check it:** `systemctl --user list-timers cdisk-scan.timer`, `journalctl --user -u cdisk-scan` (one line
+  per run: sizes, or "skipped"/"gave up"), `cmem | tail -12`.
+- **Test without touching the live cache:** `CDISK_HISTORY=<scratch>/t.tsv CDISK_SKIP_FULL=0 ./cdisk-scan.sh`
+  (must say skipped); `... CDISK_SKIP_FULL=100 CDISK_PAUSE_FULL=0 CDISK_MAX_SECS=12 ./cdisk-scan.sh` with a decoy
+  `podman unshare du -x --block-size=1M -d 1 overlay` running: its own `du` shows state `T`, gives up at 12 s,
+  and the decoy must survive. `CDISK_HISTORY=<scratch>/none.tsv cmem` shows the "no figures yet" hint.
 
 ## memwatch: sessions are told about warnings and OOM kills (2026-09-29)
 

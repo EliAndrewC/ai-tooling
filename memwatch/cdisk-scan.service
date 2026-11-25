@@ -1,0 +1,11 @@
+[Unit]
+Description=cdisk-scan: measure each Claude container's disk use for cmem (~/ai-tooling/memwatch/cdisk-scan.sh)
+
+[Service]
+Type=oneshot
+ExecStart=%h/ai-tooling/memwatch/cdisk-scan.sh
+Nice=19
+IOSchedulingClass=idle
+# Same low weights as claude.slice (fix-memory-priority.sh): the desktop's slices are 100.
+IOWeight=10
+CPUWeight=10

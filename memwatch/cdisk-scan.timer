@@ -1,0 +1,10 @@
+[Unit]
+Description=Run cdisk-scan hourly (cmem's per-container disk figures)
+
+[Timer]
+OnBootSec=3min
+OnUnitInactiveSec=1h
+Persistent=false
+
+[Install]
+WantedBy=timers.target
