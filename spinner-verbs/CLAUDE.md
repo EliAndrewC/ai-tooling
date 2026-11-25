@@ -119,7 +119,7 @@ Rules for this source:
 - `extras` shows what the chosen categories add (`-v` lists the verbs).
 - To apply only the DSK verbs: `apply --no-extras`.
 
-As of 2026-11-25, the totals are 187 built-ins, 184 DSK and 237 extras from 12 categories: 608 in all,
+As of 2026-11-25, the totals are 187 built-ins, 183 DSK and 237 extras from 12 categories: 607 in all,
 or one DSK verb in 3.3.
 
 **Regression set (Eli's own verdicts).** Any rule change must still give these:
