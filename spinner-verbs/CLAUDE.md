@@ -66,13 +66,20 @@ sources, never by cutting DSK ones.
    Worry Police", "The Leeroy Scale"). The doc is inconsistent, so judge each title. Inside a verb, the
    article goes lowercase: "Executing the Inverse Conway Maneuver".
 
+8. **A code identifier stays verbatim; add 'ing to the end instead of rewording.** "raise Hell" uses the
+   Python keyword, so it becomes "raise Hell'ing", not "Raising hell". "un-twisted" means the Twisted
+   framework, so it becomes "un-Twisted'ing". (Pew) Pew Pew'ing follows the same pattern.
+9. **Keep the title's own voice.** Edit a parenthetical only enough to read as part of the verb: "Doing
+   things right (a story point modifier)". A parenthetical that is its own sentence keeps its capital:
+   "(Deal with it!)".
+
 Families (decided):
 - "Done, not X": **no**, all of them, including "Installed, not restarted" and "Documented, not working".
 - "Why don't you X about it?": **no**.
 - "X-driven development" → "Practicing X-driven development"
 - "Always Be X" → as-is when X is a gerund ("Always be mentoring")
 - "The X Problem" → "Solving the X Problem"
-- "X, considered Y" → "Considering X Y"
+- "X, considered Y": **no**. It riffs on "X considered harmful", and the verb form loses the reference.
 
 ## Extra verbs
 
@@ -89,7 +96,7 @@ Rules for this source:
 - `extras` shows what the chosen categories add (`-v` lists the verbs).
 - To apply only the DSK verbs: `apply --no-extras`.
 
-As of 2026-11-25, the totals are 187 built-ins, 195 DSK and 237 extras from 12 categories: 619 in all,
+As of 2026-11-25, the totals are 187 built-ins, 192 DSK and 237 extras from 12 categories: 616 in all,
 or one DSK verb in 3.2.
 
 **Regression set (Eli's own verdicts).** Any rule change must still give these:
@@ -104,6 +111,9 @@ or one DSK verb in 3.2.
 | I'm just like you, but I draw GOOD cards | no | about the game itself, and needs rewording |
 | Appropriately Council Roomed | yes | Appropriately council-rooming (references are fine) |
 | robusted | yes | Robusting (to make robust, not a coworker's name) |
+| raise Hell | yes | raise Hell'ing (Python keyword kept) |
+| un-twisted | yes | un-Twisted'ing (the Twisted framework) |
+| crow, considered eaten | no | "considered harmful" riff, lost as a verb |
 | Refuriated beans | yes | Refuriating beans |
 | A suspiciously minor change | yes | Making a suspiciously minor change |
 
