@@ -48,6 +48,17 @@ Moving or deleting a folder that an existing container mounts breaks its next st
 reboot), not the running container. The launcher checks this before `podman start` and prints the `ln -s`
 fix; a symlink at the old path is enough, no recreate needed.
 
+## Per-container session registry
+
+Each container's `~/.claude/sessions` is its own folder, host `~/.claude/container-sessions/<container>/`
+(since 2026-11-25), mounted over the shared one. The tab-title hook reads it, and so do `/rename` and the
+session list. On the host, look there for a container session's record (`<pid>.json`, pid as the
+container sees it). **Don't drop this mount:** Claude Code names records by bare pid and deletes its own on
+exit, and every container counts pids from 1. Two containers restarted together both ran their first
+session as pid 31. When one session exited, it deleted the other's record. That tab then showed its
+folder name, and `/rename` said "the session list couldn't be updated". Attaching to a container made
+before this prints a note; `--fresh` applies it.
+
 ## Per-project Claude account: `.volume-overrides/`
 
 A project folder with a `.volume-overrides/` folder runs its container as its own Claude account

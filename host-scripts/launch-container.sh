@@ -607,6 +607,13 @@ note_missing_host_scripts() {
     echo ">> WARNING: '$NAME' does not have this project's .volume-overrides/ mounted, so it runs as the"
     echo "   HOST's Claude account. Relaunch with --fresh to apply them (finish its work first)."
   fi
+  # A container made before the per-container session registry (2026-11-25) shares the host's, so a
+  # session there can lose its record to another container's session with the same pid.
+  if grep -q ' /home/agent/\.claude ' <<<" $mounts " && ! grep -q ' /home/agent/\.claude/sessions ' <<<" $mounts "; then
+    echo ">> note: '$NAME' shares the host's Claude session registry, so its tab title can fall back to the"
+    echo "   folder name and /rename can say \"the session list couldn't be updated\" when another container's"
+    echo "   session has the same pid. Relaunch with --fresh to give it its own (finish its work first)."
+  fi
 }
 
 # A stopped container whose bind-mount source has since moved or been deleted cannot start:
@@ -736,6 +743,15 @@ if [ "$MOUNT_CLAUDE" -eq 1 ]; then
   [ -e "$CLAUDE_SRC/.claude.json" ] || echo '{}' > "$CLAUDE_SRC/.claude.json"
   RUN_ARGS+=( --volume "$CLAUDE_SRC/.claude.json:/home/agent/.claude.json:z" )
   RUN_ARGS+=( --volume "$CLAUDE_SRC/.claude:/home/agent/.claude:z" )
+  # Each container gets its OWN session registry (~/.claude/sessions), shadowing the shared one.
+  # Claude Code names a registry record by bare pid (<pid>.json) and deletes it when that pid exits,
+  # and every container numbers its processes from 1: after a restart the first session in two
+  # containers was pid 31 in both, one overwrote the other's record and its exit deleted it, and the
+  # survivor's tab fell back to its folder name and /rename said "the session list couldn't be
+  # updated" (2026-11-25). Sessions in other pid namespaces can't see or message each other anyway.
+  mkdir -p "$CLAUDE_SRC/.claude/container-sessions/$NAME"
+  chmod 700 "$CLAUDE_SRC/.claude/container-sessions/$NAME" 2>/dev/null || true
+  RUN_ARGS+=( --volume "$CLAUDE_SRC/.claude/container-sessions/$NAME:/home/agent/.claude/sessions:z" )
   echo ">> Claude config: mounting from $CLAUDE_SRC (created if missing, so login persists)"
 else
   echo ">> --no-claude: NOT mounting host Claude config; log in fresh inside the"

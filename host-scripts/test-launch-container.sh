@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Tests for launch-container.sh's mounts, against a FAKE podman that records `podman run`'s
 # arguments (no container is started). Run: host-scripts/test-launch-container.sh  (exit 0 = all green)
-# Covers the workdir (/<folder name>), the /host-scripts mounts and the .volume-overrides/ account override.
+# Covers the workdir (/<folder name>), the /host-scripts mounts, the per-container session registry and the .volume-overrides/ account override.
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 T="$(mktemp -d)"
@@ -62,6 +62,8 @@ check "launches (fake run recorded)" '[ -s "$T/plain.args" ]'
 check "host-scripts mounted read-only" 'vols plain | grep -q ":/host-scripts:ro,z$"'
 check "proposals queue mounted read-write" 'vols plain | grep -q ":/proposed-host-script-updates:z$"'
 check "clipboard bridge folder mounted" 'vols plain | grep -qx "$T/clipboard:/clipboard-bridge:z"'
+check "own session registry mounted over ~/.claude/sessions, after ~/.claude" '[ "$(vols plain | grep -n -e ":/home/agent/.claude:z$" | cut -d: -f1)" -lt "$(vols plain | grep -n -x -e "$T/home/.claude/container-sessions/[^:]*:/home/agent/.claude/sessions:z" | cut -d: -f1)" ]'
+check "session registry folder created, mode 700" '[ "$(stat -c %a "$T"/home/.claude/container-sessions/*)" = 700 ]'
 check "no override mounts without the folder" '! vols plain | grep -q "volume-overrides"'
 check "no override line without the folder" '! grep -q "volume-overrides" <<<"$OUT"'
 
