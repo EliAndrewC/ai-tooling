@@ -144,8 +144,8 @@ Rules for this source:
 - `extras` shows what the chosen categories add (`-v` lists the verbs).
 - To apply only the DSK verbs: `apply --no-extras`.
 
-As of 2026-11-25, the totals are 187 built-ins, 244 DSK and 237 extras from 12 categories: 668 in all,
-or one DSK verb in 2.7.
+As of 2026-11-25, the totals are 187 built-ins, 244 DSK and 271 extras from 13 categories (34 adapted from Noir Detective): 702 in all,
+or one DSK verb in 2.9.
 
 **Regression set (Eli's own verdicts).** Any rule change must still give these:
 
