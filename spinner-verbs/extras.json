@@ -16,5 +16,9 @@
     "Studio Ghibli"
   ],
   "exclude": [],
-  "exclude_note": "Entries the verb check lets through but that aren't verbs (a noun phrase that starts with an -ing word)."
+  "exclude_note": "Entries the verb check lets through but that aren't verbs (a noun phrase that starts with an -ing word).",
+  "adapted_categories": [
+    "Noir Detective"
+  ],
+  "adapted_note": "Each entry is reworded by hand into a verb phrase (or struck) using the DSK principles. The rewordings live in the private $SPINNER_VERBS_STATE/adaptations.json, because they're derived from an unlicensed list."
 }

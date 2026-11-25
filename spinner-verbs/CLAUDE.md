@@ -129,11 +129,16 @@ Rules for this source:
   starts with an -ing verb, has one second after a modifier ("Not expecting the Spanish Inquisition"),
   or is a short phrase of three words or fewer ("Mr. Plowing"). A noun phrase that slips through goes in
   `extras.json`'s `exclude` list.
+- **Adapted categories** (`adapted_categories` in `extras.json`; currently Noir Detective) mix verb
+  phrases with sentences. Each entry is reworded into a verb phrase using the DSK principles, or struck.
+  The rewordings are in the private `$SPINNER_VERBS_STATE/adaptations.json` as `"original": "verb"`, or
+  `null` to strike, because they're derived from an unlicensed list. `extras --pending` lists entries
+  with no decision. A category whose `"_status"` is `"proposed"` stays out until Eli approves it.
 - **Short verbs only, judged by category.** Eli picks the short-verb categories and approves each one as
   a whole, so there's no per-entry review and no word cap. "Waiting at the bus stop with Totoro" is
   fine because it comes from a short-verb category. Eli doesn't want the long-phrase categories. Watch out for look-alike category
-  names: "Detective / Noir" (11 short verbs) is in. "Noir Detective" (71 one-liners about code, such as
-  "Following the stack trace downtown") is **not**.
+  names: "Detective / Noir" (11 short verbs) is in. "Noir Detective" (71 one-liners about code) is in only
+  as an adapted category, entry by entry.
 - The built-in profanity block applies. The coworker-name block applies only to DSK verbs ("Questioning
   Larry" is a Lebowski character).
 - `extras` shows what the chosen categories add (`-v` lists the verbs).
@@ -163,7 +168,7 @@ or one DSK verb in 2.7.
 
 ## Testing
 
-- `bash test-spinner-verbs.sh` should end `49 passed, 0 failed`.
+- `bash test-spinner-verbs.sh` should end `52 passed, 0 failed`.
 - Against the real doc, `./spinner-verbs.py fetch` prints every album with its track count. If the album
   count doesn't match the doc's contents list, it fails and names the album it couldn't find. It warns
   about any non-empty line it drops: today that's only one footnote line.

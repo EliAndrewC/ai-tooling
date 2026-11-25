@@ -439,13 +439,35 @@ def load_extras(path, text=None):
             if cell and not re.fullmatch(r"[-: ]+|Verbs?|Phrases?|Entry", cell):
                 tables[cur].append(cell)
     out, exclude = [], {x.casefold() for x in cfg.get("exclude", [])}
-    for c in cfg["categories"]:
-        if c.endswith("Phrases"):
+    adapted = set(cfg.get("adapted_categories", []))
+    adaptations = load_adaptations()
+    for c in cfg["categories"] + [a for a in cfg.get("adapted_categories", []) if a not in cfg["categories"]]:
+        if c.endswith("Phrases") and c not in adapted:
             die(f"extras.json category {c!r} is a phrases list (sentences). fix: use the verb category, "
                 f"{c[:-len(' Phrases')]!r}")
         if c not in tables:
             close = [t for t in tables if c.casefold().split()[0] in t.casefold()][:5]
             die(f"category {c!r} not found in {cfg['source']}. fix: use its exact heading; similar: {close}")
+        if c in adapted:
+            # Each entry reworded by hand into a verb (or struck) in the private adaptations file: the
+            # rewordings are derived from an unlicensed list, so they never go in this public repo.
+            if adaptations.get(c, {}).get("_status") == "proposed":
+                print(f"spinner-verbs: warning: adapted category {c!r} is still proposed, so it's left out. "
+                      f"fix: once Eli approves it, delete its \"_status\" key in {adaptations_path()}",
+                      file=sys.stderr)
+                continue
+            amap = {clean(k).casefold(): v for k, v in adaptations.get(c, {}).items() if k != "_status"}
+            pending = 0
+            for v in tables[c]:
+                if clean(v).casefold() not in amap:
+                    pending += 1
+                elif amap[clean(v).casefold()]:
+                    out.append((c, amap[clean(v).casefold()]))
+            if pending:
+                print(f"spinner-verbs: warning: {pending} entries in adapted category {c!r} have no "
+                      f"adaptation yet. fix: `extras --pending` lists them; add each to "
+                      f"{adaptations_path()} as \"original\": \"verb\" (or null to strike)", file=sys.stderr)
+            continue
         for v in tables[c]:
             words = [w.strip(",.!?\"'") for w in v.split()]
             # A verb phrase starts with a gerund ("Grepping the streets for a clue"); a short one may lead
@@ -465,11 +487,38 @@ def load_extras(path, text=None):
     return out
 
 
+def adaptations_path():
+    return os.path.join(STATE, "adaptations.json")
+
+
+def load_adaptations():
+    try:
+        with open(adaptations_path()) as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+
+
 def blocked_profanity(verb):
     return next((w for w in PROFANITY if w in verb.casefold()), None)
 
 
 def cmd_extras(args):
+    if args.pending:
+        with open(args.extras) as f:
+            cfg = json.load(f)
+        with urllib.request.urlopen(cfg["source"], timeout=30) as r:
+            text = r.read().decode("utf-8")
+        ad = load_adaptations()
+        for c in cfg.get("adapted_categories", []):
+            m = re.search(rf"^###\s+{re.escape(c)}\s*\(\d+\)\s*$(.*?)(?=^###\s)", text, re.M | re.S)
+            known = {clean(k).casefold() for k in ad.get(c, {}) if k != "_status"}
+            for line in (m.group(1) if m else "").splitlines():
+                cell = line.strip().strip("|").strip()
+                if line.startswith("|") and cell and not re.fullmatch(r"[-: ]+|Verbs?|Phrases?|Entry", cell) \
+                        and clean(cell).casefold() not in known:
+                    print(f"{c}\t{cell}")
+        return
     rows = load_extras(args.extras)
     by = {}
     for c, v in rows:
@@ -557,6 +606,7 @@ def main():
     s.set_defaults(fn=cmd_export)
     s = sub.add_parser("extras"); s.add_argument("--extras", default=EXTRAS_FILE)
     s.add_argument("-v", "--verbose", action="store_true", help="list the verbs too")
+    s.add_argument("--pending", action="store_true", help="adapted-category entries with no adaptation yet")
     s.set_defaults(fn=cmd_extras)
     s = sub.add_parser("apply"); s.add_argument("--verbs", default=VERBS_FILE)
     s.add_argument("--extras", default=EXTRAS_FILE)
