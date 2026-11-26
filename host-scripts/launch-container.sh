@@ -21,6 +21,10 @@
 #         /proposed-host-script-updates (see "Host scripts" below)
 #       - ~/.local/share/container-clipboard at /clipboard-bridge: the clipboard
 #         bridge's drop folder (see host-scripts/clipboard-bridge.py)
+#       - the host's Claude socket folder ($XDG_RUNTIME_DIR/cc-socks) at the same
+#         path, so sessions here, on the host and in other containers can list
+#         and message each other (see "Session messaging" near the mounts;
+#         CONTAINER_PEERS=0 turns it off, another-account projects never get it)
 #       - any extra host mounts the repo declares (see below)
 #       - the project's .volume-overrides/ files, if it has that folder, on top of
 #         the Claude config: a per-project Claude account (see "Per-project
@@ -607,12 +611,12 @@ note_missing_host_scripts() {
     echo ">> WARNING: '$NAME' does not have this project's .volume-overrides/ mounted, so it runs as the"
     echo "   HOST's Claude account. Relaunch with --fresh to apply them (finish its work first)."
   fi
-  # A container made before the per-container session registry (2026-11-25) shares the host's, so a
-  # session there can lose its record to another container's session with the same pid.
-  if grep -q ' /home/agent/\.claude ' <<<" $mounts " && ! grep -q ' /home/agent/\.claude/sessions ' <<<" $mounts "; then
-    echo ">> note: '$NAME' shares the host's Claude session registry, so its tab title can fall back to the"
-    echo "   folder name and /rename can say \"the session list couldn't be updated\" when another container's"
-    echo "   session has the same pid. Relaunch with --fresh to give it its own (finish its work first)."
+  # A container made before session messaging (2026-11-26) has no shared socket folder: it either
+  # has its own session list or shares the host's without a pid offset (see peer_after_start).
+  if grep -q ' /home/agent/\.claude ' <<<" $mounts " && ! grep -q '/cc-socks ' <<<"$mounts " \
+      && [ ! -e "$REPO_ROOT/.volume-overrides" ] && [ "${CONTAINER_PEERS:-1}" = 1 ]; then
+    echo ">> note: '$NAME' was made before session messaging, so its Claude sessions can't list or message"
+    echo "   the host's or other containers' sessions. Relaunch with --fresh to enable it (finish its work first)."
   fi
 }
 
@@ -642,6 +646,58 @@ check_mount_sources() {
   fi
 }
 
+# ---- session messaging: the shared socket folder and the per-container pid offset ----
+#
+# peer_socks_of: the host folder an existing container mounts as its Claude socket folder ('' if
+# none). It lives on the tmpfs /run/user/<uid>, so it is gone after a reboot: recreate it before
+# `podman start`, or the start fails on the missing mount source.
+peer_socks_of() {
+  podman inspect -f '{{range .Mounts}}{{.Source}}|{{.Destination}}{{"\n"}}{{end}}' "$NAME" 2>/dev/null \
+    | awk -F'|' '$2 ~ /\/cc-socks$/ { print $1; exit }' || true
+}
+
+# pid_slot: this container's slot (1, 2, ...) in $CLAUDE_SRC/.claude/container-pid-slots ("slot name"
+# lines). A slot is kept for as long as its container exists; the lowest free one is handed out.
+pid_slot() {
+  local f="$CLAUDE_SRC/.claude/container-pid-slots" s n keep="" used=" " mine=""
+  mkdir -p "$CLAUDE_SRC/.claude"; touch "$f"
+  {
+    if command -v flock >/dev/null 2>&1; then flock 9; fi
+    while read -r s n; do
+      [ -n "$n" ] || continue
+      if [ "$n" = "$NAME" ]; then mine="$s"
+      elif ! podman container exists "$n" 2>/dev/null; then continue
+      fi
+      keep+="$s $n"$'\n'; used+="$s "
+    done < "$f"
+    if [ -z "$mine" ]; then
+      mine=1; while [[ "$used" == *" $mine "* ]]; do mine=$((mine + 1)); done
+      keep+="$mine $NAME"$'\n'
+    fi
+    printf '%s' "$keep" > "$f"
+  } 9>"$f.lock"
+  echo "$mine"
+}
+
+# peer_after_start <socket folder>: run after every create, start and attach of a container that
+# shares the session list ('' = it doesn't; nothing to do). Makes the runtime folder the agent's
+# (podman creates the mount's parent as root) and moves the container's pid counter up to
+# slot * PID_SLOT_SIZE by forking that many empty subshells (~0.25 ms each), so that two containers
+# started together don't both run their first Claude session as pid 31 and fight over one registry
+# record. Nothing to do once the counter is past the base. It removes the systematic collision; two
+# long-lived sessions landing on the same pid by chance stays possible and very unlikely.
+PID_SLOT_SIZE="${CONTAINER_PID_SLOT_SIZE:-5000}"
+peer_after_start() {
+  local socks="$1" slot
+  [ -n "$socks" ] || return 0
+  slot="$(pid_slot)"
+  podman exec --user root "$NAME" sh -c '
+    d=$(dirname "$1"); chown 1000:1000 "$d" 2>/dev/null; chmod 700 "$d" 2>/dev/null
+    last=$(cat /proc/sys/kernel/ns_last_pid 2>/dev/null) || exit 0
+    n=$(( $2 - last )); while [ "$n" -gt 0 ]; do (:); n=$((n - 1)); done' _ "$socks" "$((slot * PID_SLOT_SIZE))" \
+    || echo ">> warning: could not set '$NAME' pid offset (slot $slot); a session there may collide with another container's in the session list." >&2
+}
+
 # ---- if a container of this name exists, attach (or recreate with --fresh) ----
 if [ "$FRESH" -eq 1 ] && podman container exists "$NAME" 2>/dev/null; then
   echo ">> --fresh: removing existing container '$NAME'"
@@ -657,6 +713,7 @@ if [ -n "$(podman ps -q -f "name=^${NAME}$" 2>/dev/null)" ]; then
   echo ">> ports published by the running container:"
   podman port "$NAME" 2>/dev/null | sed 's/^/     /' || true
   note_missing_host_scripts
+  peer_after_start "$(peer_socks_of)"
   [ "$SHELL_AFTER" -eq 1 ] || exit 0
   open_shell
 fi
@@ -667,8 +724,11 @@ if podman container exists "$NAME" 2>/dev/null; then
   else
     echo ">> '$NAME' exists but is stopped; starting it (--no-shell)."
   fi
+  STARTED_SOCKS="$(peer_socks_of)"
+  [ -z "$STARTED_SOCKS" ] || mkdir -p -m 700 "$STARTED_SOCKS" 2>/dev/null || true   # tmpfs: gone after a reboot
   check_mount_sources
   podman start "$NAME" >/dev/null
+  peer_after_start "$STARTED_SOCKS"
   note_missing_host_scripts
   [ "$SHELL_AFTER" -eq 1 ] || exit 0
   open_shell
@@ -743,15 +803,37 @@ if [ "$MOUNT_CLAUDE" -eq 1 ]; then
   [ -e "$CLAUDE_SRC/.claude.json" ] || echo '{}' > "$CLAUDE_SRC/.claude.json"
   RUN_ARGS+=( --volume "$CLAUDE_SRC/.claude.json:/home/agent/.claude.json:z" )
   RUN_ARGS+=( --volume "$CLAUDE_SRC/.claude:/home/agent/.claude:z" )
-  # Each container gets its OWN session registry (~/.claude/sessions), shadowing the shared one.
-  # Claude Code names a registry record by bare pid (<pid>.json) and deletes it when that pid exits,
-  # and every container numbers its processes from 1: after a restart the first session in two
-  # containers was pid 31 in both, one overwrote the other's record and its exit deleted it, and the
-  # survivor's tab fell back to its folder name and /rename said "the session list couldn't be
-  # updated" (2026-11-25). Sessions in other pid namespaces can't see or message each other anyway.
-  mkdir -p "$CLAUDE_SRC/.claude/container-sessions/$NAME"
-  chmod 700 "$CLAUDE_SRC/.claude/container-sessions/$NAME" 2>/dev/null || true
-  RUN_ARGS+=( --volume "$CLAUDE_SRC/.claude/container-sessions/$NAME:/home/agent/.claude/sessions:z" )
+  # Session messaging (2026-11-26): Claude Code sessions find each other through the registry
+  # (~/.claude/sessions/<pid>.json) and talk over Unix sockets in $XDG_RUNTIME_DIR/cc-socks, so a
+  # container on the HOST's Claude account shares both: the registry (it is inside the ~/.claude
+  # mount) and the host's socket folder, mounted at the SAME path with XDG_RUNTIME_DIR pointing at
+  # it (a record holds the socket's absolute path, which must resolve on every side). ListAgents
+  # and SendMessage then work host <-> container and container <-> container, with no networking,
+  # capability or shared pid namespace. A different pid namespace does not stop Claude Code listing
+  # a peer; an unreachable socket does (read in 2.1.332's bundle, then tested).
+  #
+  # The cost of the shared registry: records are named by bare pid and a session deletes its own on
+  # exit, and every container numbers its processes from 1. After a restart the first session in two
+  # containers was pid 31 in both, and one's exit deleted the other's record (2026-11-25: the tab
+  # fell back to its folder name, /rename said "the session list couldn't be updated"). So each
+  # container starts its pids at its own offset: peer_after_start below. Don't share the registry
+  # without that offset.
+  #
+  # A project on ANOTHER person's account (.volume-overrides/) keeps its own registry and gets no
+  # socket folder, as does any launch with CONTAINER_PEERS=0 or without XDG_RUNTIME_DIR: its
+  # sessions neither see nor message the others.
+  if [ "${CONTAINER_PEERS:-1}" = 1 ] && [ -n "${XDG_RUNTIME_DIR:-}" ] \
+      && [ ! -e "$REPO_ROOT/.volume-overrides" ] && [ ! -L "$REPO_ROOT/.volume-overrides" ]; then
+    PEER_SOCKS="$XDG_RUNTIME_DIR/cc-socks"
+    mkdir -p -m 700 "$PEER_SOCKS"
+    RUN_ARGS+=( --volume "$PEER_SOCKS:$PEER_SOCKS:z" --env "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" )
+    echo ">> session messaging: sharing the session list and $PEER_SOCKS with the host and the other containers"
+  else
+    mkdir -p "$CLAUDE_SRC/.claude/container-sessions/$NAME"
+    chmod 700 "$CLAUDE_SRC/.claude/container-sessions/$NAME" 2>/dev/null || true
+    RUN_ARGS+=( --volume "$CLAUDE_SRC/.claude/container-sessions/$NAME:/home/agent/.claude/sessions:z" )
+    echo ">> session messaging: off for '$NAME' (its own session list; another account, CONTAINER_PEERS=0 or no XDG_RUNTIME_DIR)"
+  fi
   echo ">> Claude config: mounting from $CLAUDE_SRC (created if missing, so login persists)"
 else
   echo ">> --no-claude: NOT mounting host Claude config; log in fresh inside the"
@@ -934,6 +1016,7 @@ fi
 # Teardown is explicit: --fresh or `podman rm -f`.
 echo ">> starting '$NAME' detached (workdir $WORKDIR) from $IMAGE"
 podman run "${RUN_ARGS[@]}" "$IMAGE" sleep infinity >/dev/null
+peer_after_start "${PEER_SOCKS:-}"
 
 # ---- system packages (fresh containers only) ----
 #

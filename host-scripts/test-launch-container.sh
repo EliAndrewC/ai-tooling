@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Tests for launch-container.sh's mounts, against a FAKE podman that records `podman run`'s
 # arguments (no container is started). Run: host-scripts/test-launch-container.sh  (exit 0 = all green)
-# Covers the workdir (/<folder name>), the /host-scripts mounts, the per-container session registry and the .volume-overrides/ account override.
+# Covers the workdir (/<folder name>), the /host-scripts mounts, session messaging (shared socket folder, pid slots; private registry for another account) and the .volume-overrides/ account override.
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 T="$(mktemp -d)"
@@ -28,6 +28,7 @@ EOF
 chmod +x "$T/bin/podman"
 export PATH="$T/bin:$PATH" CONTAINER_SLICE="" CLAUDE_SRC="$T/home" HOST_SCRIPT_PROPOSALS="$T/proposals" CONTAINER_CLIPBOARD="$T/clipboard"
 mkdir -p "$T/home/.claude"
+export XDG_RUNTIME_DIR="$T/run"; mkdir -p "$XDG_RUNTIME_DIR"
 echo '{"oauthAccount":{"emailAddress":"host@example.com"},"hasCompletedOnboarding":true}' > "$T/home/.claude.json"
 
 newrepo() { # newrepo <name>: a git repo with a CLAUDE.md, ignoring .volume-overrides/ unless told not to
@@ -62,8 +63,11 @@ check "launches (fake run recorded)" '[ -s "$T/plain.args" ]'
 check "host-scripts mounted read-only" 'vols plain | grep -q ":/host-scripts:ro,z$"'
 check "proposals queue mounted read-write" 'vols plain | grep -q ":/proposed-host-script-updates:z$"'
 check "clipboard bridge folder mounted" 'vols plain | grep -qx "$T/clipboard:/clipboard-bridge:z"'
-check "own session registry mounted over ~/.claude/sessions, after ~/.claude" '[ "$(vols plain | grep -n -e ":/home/agent/.claude:z$" | cut -d: -f1)" -lt "$(vols plain | grep -n -x -e "$T/home/.claude/container-sessions/[^:]*:/home/agent/.claude/sessions:z" | cut -d: -f1)" ]'
-check "session registry folder created, mode 700" '[ "$(stat -c %a "$T"/home/.claude/container-sessions/*)" = 700 ]'
+check "session messaging: host socket folder mounted at the same path" 'vols plain | grep -qx "$T/run/cc-socks:$T/run/cc-socks:z" && [ "$(stat -c %a "$T/run/cc-socks")" = 700 ]'
+check "session messaging: XDG_RUNTIME_DIR passed so sessions put their sockets there" 'grep -A1 -x -- --env "$T/plain.args" | grep -qx "XDG_RUNTIME_DIR=$T/run"'
+check "session messaging: registry shared (no private one mounted over it)" '! vols plain | grep -q ":/home/agent/.claude/sessions:"'
+check "session messaging: launch says so" 'grep -q "session messaging: sharing the session list" <<<"$OUT"'
+check "pid slot recorded for the container" 'grep -qx "1 claude-plain" "$T/home/.claude/container-pid-slots"'
 check "no override mounts without the folder" '! vols plain | grep -q "volume-overrides"'
 check "no override line without the folder" '! grep -q "volume-overrides" <<<"$OUT"'
 
@@ -90,6 +94,7 @@ check "launch line names both overrides" 'grep -qx ">> volume-overrides: .claude
 check "credentials created as {} (logged out)" '[ "$(cat "$V/.claude/.credentials.json")" = "{}" ]'
 check ".claude.json seeded from the host's, minus oauthAccount" 'python3 -c "import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if \"oauthAccount\" not in d and d.get(\"hasCompletedOnboarding\") else 1)" "$V/.claude.json"'
 check "files are regular files, mode 600; folders 700" '[ -f "$V/.claude.json" ] && [ "$(stat -c %a "$V/.claude.json" "$V/.claude/.credentials.json" "$V" "$V/.claude" | tr "\n" " ")" = "600 600 700 700 " ]'
+check "another account: own session registry (mode 700), after ~/.claude, and no socket folder" '[ "$(vols other | grep -n -e ":/home/agent/.claude:z$" | cut -d: -f1)" -lt "$(vols other | grep -n -x -e "$T/home/.claude/container-sessions/[^:]*:/home/agent/.claude/sessions:z" | cut -d: -f1)" ] && [ "$(stat -c %a "$T"/home/.claude/container-sessions/*)" = 700 ] && ! vols other | grep -q cc-socks && ! grep -q "XDG_RUNTIME_DIR" "$T/other.args"'
 check "override mounts come after the ~/.claude mount" '[ "$(vols other | grep -n -e ":/home/agent/.claude:z$" | cut -d: -f1)" -lt "$(vols other | grep -n -e "credentials.json:/home/agent/.claude/.credentials.json:z$" | cut -d: -f1)" ]'
 check "override .claude.json REPLACES the host's mount (one mount there, no duplicate)" '[ "$(vols other | grep -c ":/home/agent/.claude.json:")" = 1 ] && vols other | grep -q "volume-overrides/.claude.json:/home/agent/.claude.json:z$" && ! grep -q "duplicate mount" <<<"$OUT"'
 check "host config untouched" 'grep -q oauthAccount "$T/home/.claude.json" && [ ! -e "$T/home/.claude/.credentials.json" ]'
@@ -194,6 +199,24 @@ check "another missing source: named, generic fix" '[ "$RC" -ne 0 ] && grep -qF 
 export FAKE_GONE="$T/still-here" FAKE_GONE_DST=/data
 stopped
 check "all sources present: the container is started" '[ "$RC" -eq 0 ] && [ -s "$T/started" ]'
+
+# --- pid slots and the pid offset (session messaging): the functions on their own, with a stub podman
+slots() ( # slots <container name> <existing containers...>: prints the slot (or runs $SLOT_CALL $SLOT_ARG)
+  eval "$(sed -n '/^pid_slot() {/,/^}/p; /^PID_SLOT_SIZE=/p; /^peer_after_start() {/,/^}/p' "$HERE/launch-container.sh")"
+  NAME="$1"; shift; EXISTING=" $* "
+  podman() { case "$1" in container) [[ "$EXISTING" == *" $3 "* ]] ;; exec) printf '%s\n' "$@" > "$T/offset.args" ;; esac; }
+  CLAUDE_SRC="$T/slots"; "${SLOT_CALL:-pid_slot}" ${SLOT_ARG+"$SLOT_ARG"}
+)
+rm -rf "$T/slots"
+check "pid slots: first container gets 1, second gets 2, each keeps its own" '[ "$(slots claude-a)" = 1 ] && [ "$(slots claude-b claude-a)" = 2 ] && [ "$(slots claude-a claude-b)" = 1 ] && [ "$(slots claude-b claude-a)" = 2 ]'
+check "pid slots: a removed container's slot is handed out again" '[ "$(slots claude-c claude-b)" = 1 ] && ! grep -q claude-a "$T/slots/.claude/container-pid-slots"'
+SLOT_CALL=peer_after_start SLOT_ARG=/run/user/7/cc-socks slots claude-b claude-c
+check "pid offset: runs as root with the socket folder and slot * 5000" 'grep -qx -- --user "$T/offset.args" && grep -qx claude-b "$T/offset.args" && [ "$(tail -2 "$T/offset.args" | tr "\n" " ")" = "/run/user/7/cc-socks 10000 " ]'
+rm -f "$T/offset.args"; SLOT_CALL=peer_after_start SLOT_ARG="" slots claude-b claude-c
+check "pid offset: nothing to do for a container without the socket folder" '[ ! -e "$T/offset.args" ]'
+OFFSET_SH="$(sed -n "/^peer_after_start() {/,/^}/p" "$HERE/launch-container.sh" | sed -n "/sh -c '/,/done'/p" | sed "1s/.*sh -c '//; \$s/'.*//")"
+mkdir -p "$T/rt/cc-socks"; BASE=$(( $(cat /proc/sys/kernel/ns_last_pid) + 300 )); sh -c "$OFFSET_SH" _ "$T/rt/cc-socks" "$BASE"
+check "pid offset: the in-container command forks up to the base (real sh, this pid namespace)" '[ "$(cat /proc/sys/kernel/ns_last_pid)" -ge "$BASE" ] && [ "$(stat -c %a "$T/rt")" = 700 ]'
 
 rm -rf "$T"
 [ "$FAIL" -eq 0 ] && echo "all green" || { echo "FAILURES"; exit 1; }

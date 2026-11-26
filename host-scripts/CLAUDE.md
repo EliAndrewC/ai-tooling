@@ -48,16 +48,42 @@ Moving or deleting a folder that an existing container mounts breaks its next st
 reboot), not the running container. The launcher checks this before `podman start` and prints the `ln -s`
 fix; a symlink at the old path is enough, no recreate needed.
 
-## Per-container session registry
+## Session messaging between host and containers
 
-Each container's `~/.claude/sessions` is its own folder, host `~/.claude/container-sessions/<container>/`
-(since 2026-11-25), mounted over the shared one. The tab-title hook reads it, and so do `/rename` and the
-session list. On the host, look there for a container session's record (`<pid>.json`, pid as the
-container sees it). **Don't drop this mount:** Claude Code names records by bare pid and deletes its own on
-exit, and every container counts pids from 1. Two containers restarted together both ran their first
-session as pid 31. When one session exited, it deleted the other's record. That tab then showed its
-folder name, and `/rename` said "the session list couldn't be updated". Attaching to a container made
-before this prints a note; `--fresh` applies it.
+Since 2026-11-26 a container on the host's Claude account shares two things with the host and with every
+other such container, so `ListAgents` / `SendMessage` work host <-> container and container <-> container:
+
+- the session registry `~/.claude/sessions/` (records `<pid>.json`, pid as that container sees it, plus the
+  per-session `.key` files), which is simply inside the `~/.claude` mount;
+- the host's socket folder `$XDG_RUNTIME_DIR/cc-socks`, mounted at the **same path**, with `XDG_RUNTIME_DIR`
+  set in the container so its sessions create their sockets there. A record stores the socket's absolute
+  path, so it has to resolve on every side. No networking, capability or shared pid namespace is involved.
+
+**Pid offset, and why not to drop it:** Claude Code names records by bare pid and deletes its own on exit,
+and every container counts pids from 1. On 2026-11-25 two containers restarted together both ran their first
+session as pid 31; one's exit deleted the other's record (tab showed the folder name, `/rename` said "the
+session list couldn't be updated"). So after every create, start and attach the launcher forks the
+container's pid counter up to `slot * 5000` (`peer_after_start`; slots in `~/.claude/container-pid-slots`,
+one per existing container). Don't share the registry without it. A chance collision between two
+long-lived sessions stays possible and very unlikely; the fix is the one above (rewrite the record).
+
+**Not shared:** a `.volume-overrides/` project (another person's account), `CONTAINER_PEERS=0`, or a host
+without `XDG_RUNTIME_DIR`: that container gets its own registry (`~/.claude/container-sessions/<container>/`)
+and no socket folder. A container made before 2026-11-26 has no socket folder either; attaching prints a
+note and `--fresh` applies it.
+
+**Confirm it works:** in a container session, `ListAgents` lists the host's sessions. From the host:
+`ls $XDG_RUNTIME_DIR/cc-socks` shows one `<pid>.sock` per live session, and `podman exec <c> sh -c 'stat -c %i
+$XDG_RUNTIME_DIR/cc-socks'` prints the same inode as on the host. A different inode means the host folder
+was recreated (reboot, logout) while the container ran: restart the container through the launcher.
+
+**What it opens up:** any container session can put a message in front of the host's sessions and read the
+registry's key files. Messages arrive marked as coming from another session and can't approve anything.
+Sessions in different permission modes may hold each other's messages for the user's approval.
+
+**Tested 2026-11-26 (Claude Code 2.1.332):** host <-> container and container <-> container round trips,
+launcher-made containers, including stop and start of two together. Not tested: a session started with
+`--dangerously-skip-permissions`, waking an idle interactive session, a real reboot.
 
 ## Per-project Claude account: `.volume-overrides/`
 
