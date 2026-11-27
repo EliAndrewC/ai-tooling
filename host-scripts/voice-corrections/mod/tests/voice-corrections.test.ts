@@ -7,13 +7,16 @@ const RULES = JSON.stringify({ rules: [
 ] })
 
 // A fake world: the prompt box, the space-bar file, and what the mod wrote into the box.
-function world(on, opts: { space?: boolean } = {}) {
+function world(on, opts: { space?: boolean, draftsFail?: boolean } = {}) {
   const clock = mock.clock(on, { now: 1_000_000 })
   mock.env(on, { HOME: '/home/test' })
-  const w = { box: '', space: String(1_000_000 - 5000), fills: [] as string[], clock }
+  const w = { box: '', space: String(1_000_000 - 5000), fills: [] as string[], clock, files: {} as Record<string, string>, writes: 0 }
   on('fs.stat', () => ({ value: { kind: 'file', size: 1, mtimeMs: 1, isLink: false } }))
   on('fs.exists', () => ({ value: false }))
-  on('fs.write', () => ({ value: undefined }))
+  on('fs.write', ($, e) => {
+    if (opts.draftsFail && e.path.includes('/prompt-drafts/')) return { deny: 'EROFS' }
+    w.files[e.path] = e.text; w.writes++; return { value: undefined }
+  })
   on('fs.read', ($, e) => {
     if (e.path.endsWith('corrections.json')) return { value: RULES }
     if (e.path.endsWith('spacebar')) return opts.space === false ? { deny: 'ENOENT' } : { value: w.space }
@@ -140,7 +143,7 @@ test('a paragraph break typed right after a dictation lands on the corrected tex
 test('a (A -> B) footnote is added as a rule, applied, and removed', async ($, on) => {
   const w = world(on)
   const runs: string[][] = []
-  on('process.run', ($, e) => { runs.push(e.argv); return { value: { exitCode: 0, stdout: 'added', stderr: '' } } })
+  on('process.run', ($, e) => { if (e.argv[0] !== 'find') runs.push(e.argv); return { value: { exitCode: 0, stdout: 'added', stderr: '' } } })  // find: the draft prune at start
   await start($)
   const out = await $.prompt.submit({ text: 'how Rakugani budgeting works (Rakugani -> Rokugani)' })
   expect(out.text).toBe('how Rokugani budgeting works')
@@ -181,4 +184,66 @@ test('a rule added mid-session applies to the very next dictation', async ($, on
   w.space = String(clock.now())
   await clock.advance(1500)
   expect(w.fills).toEqual(['run perf-ab'])
+})
+
+// --- draft autosave: the unsent box is kept in ~/.claude/prompt-drafts/<session id>.txt
+const DRAFTS = '/home/test/.claude/prompt-drafts'
+const LONG = 'a long unsent prompt, typed or dictated, that must not be lost. '.repeat(5)
+const current = (w) => Object.entries(w.files).filter(([p]) => p.startsWith(DRAFTS) && !p.includes('.cleared.'))
+const cleared = (w) => Object.entries(w.files).filter(([p]) => p.startsWith(DRAFTS) && p.includes('.cleared.'))
+
+test('draft: the unsent box is saved, at most every 2 s, and short text is not', async ($, on) => {
+  const w = world(on)
+  await start($)
+  w.box = 'too short to keep'
+  await w.clock.advance(3000)
+  expect(current(w)).toEqual([])
+  w.box = LONG
+  await w.clock.advance(2500)
+  expect(current(w).length).toBe(1)
+  expect(current(w)[0][1]).toBe(LONG)
+  const before = w.writes
+  for (let i = 0; i < 10; i++) { w.box += ' more'; await w.clock.advance(100) }   // 1 s of streaming text
+  expect(w.writes - before).toBeLessThanOrEqual(1)
+  await w.clock.advance(2500)
+  expect(current(w)[0][1]).toBe(w.box)
+})
+
+test('draft: a long draft cleared without a submit is kept in its own file', async ($, on) => {
+  const w = world(on)
+  await start($)
+  w.box = LONG
+  await w.clock.advance(2500)
+  w.box = ''                                      // Esc Esc, Ctrl+C
+  await w.clock.advance(2500)
+  expect(cleared(w).map(([, text]) => text)).toEqual([LONG])
+  expect(current(w)[0][1]).toBe('')               // nothing unsent any more
+})
+
+test('draft: a sent prompt and an edited one are not kept as cleared', async ($, on) => {
+  const w = world(on)
+  await start($)
+  w.box = LONG
+  await w.clock.advance(2500)
+  w.box = LONG.slice(0, -30) + ' with a new ending'   // a hand edit near the end
+  await w.clock.advance(2500)
+  const sent = w.box
+  await $.prompt.submit({ text: sent })
+  w.box = ''
+  await w.clock.advance(2500)
+  expect(cleared(w)).toEqual([])
+  expect(current(w)[0][1]).toBe('')
+})
+
+test('draft: a failing write never stops a correction', async ($, on) => {
+  const w = world(on, { draftsFail: true })
+  await start($)
+  w.space = '0'
+  await w.clock.advance(300)
+  w.box = 'the Asawa family, ' + LONG
+  await w.clock.advance(300)
+  w.space = String(w.clock.now())
+  await w.clock.advance(1500)
+  expect(w.fills).toEqual(['the Isawa family, ' + LONG])
+  expect(current(w)).toEqual([])                  // and the write really was refused
 })

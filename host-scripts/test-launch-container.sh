@@ -144,23 +144,28 @@ cat > "$T/runbin/podman" <<'EOF2'
 case "$1" in
   ps) echo runid ;;                            # running
   exec) shift
-        if [ "$1" = -it ]; then echo "EXEC-IT: $*"; exit 0; fi   # the final interactive exec
+        if [ "$1" = -it ]; then echo "EXEC-IT: $*"                # the final interactive exec
+          # FAKE_DROPS: that many attaches end like a dropped connection (255) before one ends cleanly
+          n=$(cat "$FAKE_DROPS" 2>/dev/null || echo 0); [ "$n" -gt 0 ] || exit 0
+          echo $((n - 1)) > "$FAKE_DROPS"; exit 255; fi
+        case "$*" in *has-session*) [ ! -e "$FAKE_SESSION_GONE" ]; exit ;; *"new-session -d"*) echo 7; exit ;; esac
         if [ "$2" = bash ] && [ "$3" = -c ]; then shift 3; HOME="$FAKE_HOME" bash -c "$@"; exit; fi  # history seeding
-        case "$*" in *list-sessions*) printf '0\tclaude-a\tWAITING - no terminal attached\t(x)\n1\tclaude-b\tWAITING - no terminal attached\t(y)\n' ;; esac ;;
+        case "$*" in *list-sessions*) [ -z "${FAKE_SESSIONS:-}" ] || { printf "$FAKE_SESSIONS"; exit; }; printf '0\tclaude-a\tWAITING - no terminal attached\t(x)\n1\tclaude-b\tWAITING - no terminal attached\t(y)\n' ;; esac ;;
   *) exit 0 ;;
 esac
 EOF2
 chmod +x "$T/runbin/podman"
 newrepo running
 export FAKE_HOME="$T/agenthome"; mkdir -p "$FAKE_HOME"
+export FAKE_DROPS="$T/drops" FAKE_SESSION_GONE="$T/session-gone"
 echo 'alias mine=1' > "$FAKE_HOME/.bashrc"
 printf '%s\n' 'ls' 'claude --dangerously-skip-permissions' 'make test' 'claude --dangerously-skip-permissions --continue' > "$FAKE_HOME/.bash_history"
 shell() { OUT=$(cd "$T/running" && PATH="$T/runbin:$PATH" bash "$HERE/launch-container.sh" "$@" 2>&1); }
 OUT=$(cd "$T/running" && printf '\n' | PATH="$T/runbin:$PATH" script -qec "bash '$HERE/launch-container.sh'" /dev/null 2>&1)  # a tty, so the old menu would show
-check "plain launch opens a NEW tmux session, no menu" 'grep -q "EXEC-IT: .*tmux -u new-session" <<<"$OUT" && ! grep -q "Up/Down" <<<"$OUT"'
+check "plain launch opens a NEW tmux session, no menu" 'grep -q "EXEC-IT: .*tmux -u attach -d -t =7" <<<"$OUT" && ! grep -q "Up/Down" <<<"$OUT"'
 check "plain launch notes the waiting sessions and --resume" 'grep -q "2 tmux session(s) WAITING.*launch-container --resume" <<<"$OUT"'
 OUT=$(cd "$T/running" && printf '\e[B\n' | PATH="$T/runbin:$PATH" script -qec "bash '$HERE/launch-container.sh' --resume" /dev/null 2>&1)
-check "--resume shows the menu; Down+Enter attaches the first session" 'grep -q "Up/Down" <<<"$OUT" && grep -q "EXEC-IT: .*tmux -u attach -t 0" <<<"$OUT"'
+check "--resume shows the menu; Down+Enter attaches the first session" 'grep -q "Up/Down" <<<"$OUT" && grep -q "EXEC-IT: .*tmux -u attach -d -t =0" <<<"$OUT"'
 check "a new shell makes the claude command the newest history entry, once" '[ "$(tail -1 "$FAKE_HOME/.bash_history")" = "claude --dangerously-skip-permissions" ] && [ "$(grep -cxF "claude --dangerously-skip-permissions" "$FAKE_HOME/.bash_history")" = 1 ]'
 check "the rest of the history is kept, in order" '[ "$(head -3 "$FAKE_HOME/.bash_history" | tr "\n" "|")" = "ls|make test|claude --dangerously-skip-permissions --continue|" ]'
 shell --no-tmux   # a second launch: the prompt block is replaced, not added again
@@ -171,7 +176,25 @@ check "~/.bashrc gets one prompt block (agent:/repo, sets the title), its own li
 echo 'vim notes' >> "$FAKE_HOME/.bash_history"
 shell --attach 1
 check "attaching to a running session leaves the history alone" '[ "$(tail -1 "$FAKE_HOME/.bash_history")" = "vim notes" ]'
-check "--attach NAME still attaches directly" 'grep -q "EXEC-IT: .*tmux -u attach -t 1" <<<"$OUT"'
+check "--attach NAME still attaches directly" 'grep -q "EXEC-IT: .*tmux -u attach -d -t =1" <<<"$OUT"'
+check "a clean end with the session still there says how to return, and attaches once" 'grep -q "still running.*launch-container --attach 1" <<<"$OUT" && [ "$(grep -c EXEC-IT <<<"$OUT")" = 1 ]'
+# A dropped connection (exit 255, session alive) reattaches by itself; a tty is needed to come back to.
+tty_shell() { OUT=$(cd "$T/running" && PATH="$T/runbin:$PATH" script -qec "bash '$HERE/launch-container.sh' $*" /dev/null 2>&1 </dev/null); }
+echo 2 > "$FAKE_DROPS"; tty_shell --attach 1
+check "dropped connection: says so and reattaches until an attach ends cleanly" '[ "$(grep -c "EXEC-IT: .*attach -d -t =1" <<<"$OUT")" = 3 ] && [ "$(grep -c "dropped; session .1. kept running" <<<"$OUT")" = 2 ]'
+echo 9 > "$FAKE_DROPS"; tty_shell --attach 1
+check "dropped connection: gives up after 3 fast failures, with the command to return" '[ "$(grep -c EXEC-IT <<<"$OUT")" = 3 ] && grep -q "keeps dropping; giving up" <<<"$OUT" && grep -q "launch-container --attach 1" <<<"$OUT"'
+echo 9 > "$FAKE_DROPS"; shell --attach 1
+check "dropped connection without a terminal: no reattach" '[ "$(grep -c EXEC-IT <<<"$OUT")" = 1 ]'
+echo 9 > "$FAKE_DROPS"; : > "$FAKE_SESSION_GONE"; tty_shell --attach 1; rm -f "$FAKE_SESSION_GONE" "$FAKE_DROPS"
+check "an error with the session gone: no reattach" '[ "$(grep -c EXEC-IT <<<"$OUT")" = 1 ] && ! grep -q "Reattaching" <<<"$OUT"'
+# Bare --attach: the only waiting session; else the only session, even one a dead client holds attached.
+FAKE_SESSIONS='0\tclaude-a\tattached in a terminal\t(x)\n' shell --attach
+check "--attach alone takes the only session even when it counts as attached (dropped tab)" 'grep -q "EXEC-IT: .*attach -d -t =0" <<<"$OUT"'
+FAKE_SESSIONS='0\tclaude-a\tattached in a terminal\t(x)\n1\tclaude-b\tWAITING - no terminal attached\t(y)\n' shell --attach
+check "--attach alone prefers the only WAITING session" 'grep -q "EXEC-IT: .*attach -d -t =1" <<<"$OUT"'
+FAKE_SESSIONS='0\tclaude-a\tattached in a terminal\t(x)\n1\tclaude-b\tattached in a terminal\t(y)\n' shell --attach
+check "--attach alone with several running and none waiting lists them, opens nothing" 'grep -q "several tmux sessions are running" <<<"$OUT" && ! grep -q EXEC-IT <<<"$OUT"'
 
 # --- a STOPPED container whose mount source is gone: refused before `podman start`, with the fix
 mkdir -p "$T/stopbin" "$T/still-here"

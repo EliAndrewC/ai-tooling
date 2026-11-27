@@ -148,9 +148,17 @@
 # already waiting). --resume instead shows an arrow-key menu over the running
 # sessions (Enter alone still starts a new one) listing each one, whether a
 # terminal is attached, and its title (Claude Code sets it to the session's name).
-# --attach [NAME] reattaches without a menu - after a dropped connection, or to
-# pick a session up from another tab. With no NAME it takes the only waiting
-# session, and lists them when there are several.
+# --attach [NAME] reattaches without a menu - to pick a session up from another
+# tab (the other tab is detached). With no NAME it takes the only waiting
+# session, or the only session at all, and lists them when there are several.
+#
+# A dropped connection reattaches BY ITSELF (2026-11-26): the launcher stays
+# behind the tmux client and, when `podman exec` ends with an error while the
+# session is still alive, says so and attaches again (attach_loop). Measured:
+# a drop exits 255 and leaves a dead client attached inside the container, a
+# deliberate detach (Ctrl+b d) or being taken over by another tab exits 0.
+# Before this the tab silently fell back to the host prompt, which looked like
+# the session, and the unsent prompt in it, had been lost.
 #
 # --no-shell makes the script ENSURE the container is running and then return,
 # instead of ending in an interactive `podman exec ... bash`. Every other step is
@@ -523,6 +531,39 @@ set_git_identity() {
     || echo ">> warning: could not set the git identity inside '$NAME'." >&2
 }
 
+# Attach this terminal to tmux session $1 and keep it attached across dropped connections (see "A
+# dropped connection" in the header). Never returns. -d detaches every other client of the session:
+# a dropped tab's dead client stays attached inside the container and would otherwise pin the window
+# to its size. Don't go back to `exec podman exec`: nothing is then left to notice the drop.
+# Gives up after 3 attaches in a row that each ended within 5 s, so a broken container can't spin.
+attach_loop() {
+  local target="$1" rc fast=0 t0
+  while :; do
+    t0=$SECONDS; rc=0
+    podman exec -it --env LANG=C.UTF-8 "$NAME" tmux -u attach -d -t "=$target" || rc=$?
+    if [ "$rc" -eq 0 ]; then
+      # The shell exited, or a deliberate detach (also: another tab took the session over).
+      if podman exec "$NAME" tmux has-session -t "=$target" 2>/dev/null; then
+        echo ">> session '$target' is still running in '$NAME'; to return: launch-container --attach $target"
+      fi
+      exit 0
+    fi
+    # The dead client never restored the terminal: leave mouse reporting and the alternate screen.
+    [ -t 1 ] && printf '\e[?1000l\e[?1002l\e[?1003l\e[?1006l\e[?2004l\e[?1049l\e[?25h'
+    [ -t 0 ] && stty sane 2>/dev/null || true
+    podman exec "$NAME" tmux has-session -t "=$target" 2>/dev/null || exit "$rc"   # session or container gone
+    [ -t 0 ] || exit "$rc"                                                         # no terminal to come back to
+    if [ $((SECONDS - t0)) -lt 5 ]; then fast=$((fast + 1)); else fast=0; fi
+    if [ "$fast" -ge 3 ]; then
+      echo ">> the connection to '$NAME' keeps dropping; giving up. Session '$target' is still running," >&2
+      echo "   with anything typed into it. To return: launch-container --attach $target" >&2
+      exit "$rc"
+    fi
+    echo ">> the connection to '$NAME' dropped; session '$target' kept running (an unsent prompt is still in its box). Reattaching..."
+    sleep 1
+  done
+}
+
 open_shell() {
   write_prompt
   set_git_identity
@@ -552,24 +593,28 @@ open_shell() {
     if [ -n "$ATTACH" ]; then
       local target="$ATTACH"
       if [ "$target" = "-" ]; then
-        case "$(printf '%s' "$detached" | grep -c .)" in
-          0) echo ">> --attach: no tmux session is waiting in '$NAME'; opening a new one." ;;
-          1) target="$(printf '%s' "$detached" | cut -f1)" ;;
-          *) echo ">> --attach: several tmux sessions are waiting in '$NAME'; name one:" >&2
-             printf '%s\n' "$detached" | sed 's/^/     /' >&2
+        # No session waiting but exactly one running: take that one. "Attached" may be a dropped
+        # tab's dead client (2026-11-26: --attach opened a NEW session beside the one Eli wanted).
+        local pool="$detached"
+        [ -n "$pool" ] || pool="$sessions"
+        case "$(printf '%s' "$pool" | grep -c .)" in
+          0) echo ">> --attach: no tmux session is running in '$NAME'; opening a new one." ;;
+          1) target="$(printf '%s' "$pool" | cut -f1)" ;;
+          *) echo ">> --attach: several tmux sessions are $([ -n "$detached" ] && echo waiting || echo running) in '$NAME'; name one:" >&2
+             printf '%s\n' "$pool" | sed 's/^/     /' >&2
              echo "   $0 --attach <name>" >&2
              exit 1 ;;
         esac
       fi
       if [ "$target" != "-" ]; then
         echo ">> reattaching to tmux session '$target'."
-        exec podman exec -it --env LANG=C.UTF-8 "$NAME" tmux -u attach -t "$target"
+        attach_loop "$target"
       fi
     elif [ "$RESUME" -eq 1 ] && [ -n "$sessions" ] && [ -t 0 ]; then
       pick_session "$sessions"
       if [ -n "$PICKED" ]; then
         echo ">> attaching to tmux session '$PICKED'."
-        exec podman exec -it --env LANG=C.UTF-8 "$NAME" tmux -u attach -t "$PICKED"
+        attach_loop "$PICKED"
       fi
     elif [ "$RESUME" -eq 1 ]; then
       [ -n "$sessions" ] || echo ">> --resume: no tmux session is running in '$NAME'."
@@ -577,7 +622,15 @@ open_shell() {
       echo ">> $(printf '%s\n' "$detached" | grep -c .) tmux session(s) WAITING in '$NAME' (dropped tabs); to pick one: launch-container --resume"
     fi
     seed_history
-    echo ">> opening a new tmux session (if this terminal drops, the session keeps running)."
+    echo ">> opening a new tmux session (if this terminal drops, the session keeps running and this tab reattaches)."
+    # Created detached so its name is known, then attached through attach_loop. At this terminal's
+    # size, so the shell doesn't start at 80x24 and redraw.
+    local created size
+    size="$(stty size 2>/dev/null || true)"
+    created="$(podman exec --env LANG=C.UTF-8 "$NAME" tmux -u new-session -d -P -F '#{session_name}' \
+      ${size:+-x "${size#* }" -y "${size% *}"} 2>/dev/null || true)"
+    [ -z "$created" ] || attach_loop "$created"
+    echo ">> warning: could not create the session detached; attaching directly (no automatic reattach)." >&2
     exec podman exec -it --env LANG=C.UTF-8 "$NAME" tmux -u new-session
   fi
   [ -z "$ATTACH" ] && [ "$RESUME" -eq 0 ] || die "--attach/--resume need tmux in '$NAME' (and not --no-tmux)"

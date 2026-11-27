@@ -17,6 +17,11 @@
 // correction. On submit the mod adds it with the voice-corrections CLI (file lock, example and idempotency
 // checks), applies it to this message, removes the footnote, and tells Claude in a context line.
 
+//
+// Draft autosave (2026-11-26): the same poll also keeps the unsent prompt on disk, typed or dictated, so
+// a draft survives the session dying, and one that vanishes from the box without being sent (Esc Esc,
+// Ctrl+C, history recall) is kept too. See saveDraft below and "Unsent drafts" in ../../CLAUDE.md.
+
 import { compile, correct, correctSpan, diffSpan, findFootnotes, stripFootnote } from "./corrector.mjs"
 
 const POLL_MS = 100
@@ -24,6 +29,12 @@ const SETTLE_MS = 1000
 // Dictation counts only if space was seen held within this long before the first dictated text.
 const SPACE_LEAD_MS = 3000
 const CONFIG_CHECK_MS = 2000
+// Drafts: the box is written to <drafts>/<session id>.txt at most this often, once it is DRAFT_MIN long.
+const DRAFT_SAVE_MS = 2000
+const DRAFT_MIN = 40
+// A draft at least this long that is replaced or emptied without a submit gets its own .cleared file.
+const DRAFT_LOST_MIN = 200
+const DRAFT_KEEP_DAYS = 14
 
 // Per-session state (one module instance per session)
 const S = {
@@ -38,6 +49,9 @@ const S = {
   spaceSignal: false,      // the spacebar-watch file exists
   busy: false,
   logQueue: Promise.resolve(),
+  // dir: null until session.start; last: the box at the previous tick; saved: what <id>.txt holds;
+  // sent: the last submitted text as it stood in the box (so a sent prompt is never kept as "cleared")
+  draft: { dir: null, id: "session", last: "", saved: "", savedAt: -Infinity, sent: null },
 }
 
 function log($, line) {
@@ -82,6 +96,31 @@ async function readSpace($) {
   }
 }
 
+// Keeps the unsent prompt on disk. <id>.txt is the box as of the last DRAFT_SAVE_MS (emptied once the
+// box is: sent prompts are in ~/.claude/history.jsonl). <id>.<time>.cleared.txt is a long draft that
+// left the box without being sent: less than half of it survives in the new text. Don't make this
+// "never overwrite a longer draft": dictation and hand edits shrink the text all the time.
+// Errors are swallowed by the caller: a draft that can't be saved must never stop a correction.
+async function saveDraft($, now, text) {
+  const d = S.draft
+  if (!d.dir) return
+  const prev = d.last
+  d.last = text
+  if (text !== prev && prev.length >= DRAFT_LOST_MIN && prev !== d.sent) {
+    const { prefix, suffix } = diffSpan(prev, text)
+    if (prefix.length + suffix.length < prev.length / 2) {
+      const stamp = new Date(now).toISOString().slice(0, 19).replace(/:/g, "-") + "Z"  // UTC
+      await $.fs.write(`${d.dir}/${d.id}.${stamp}.cleared.txt`, prev)
+      log($, `draft kept: ${prev.length} chars left the box unsent`)
+    }
+  }
+  const keep = text.length >= DRAFT_MIN ? text : ""
+  if (keep === d.saved || now - d.savedAt < DRAFT_SAVE_MS) return
+  d.savedAt = now
+  await $.fs.write(`${d.dir}/${d.id}.txt`, keep)
+  d.saved = keep
+}
+
 function isDictation(p) {
   // Without the service there's no way to tell dictation from e.g. recalled history; correct anyway
   // (corrections are idempotent, so already-corrected history is unchanged).
@@ -101,6 +140,7 @@ async function tick($) {
     const space = await readSpace($)
     if (space === 0) S.spaceDownAt = now
     const box = await $.prompt.read()
+    await saveDraft($, now, box.text).catch(err => log($, `draft not saved: ${err && err.message}`))
 
     if (!S.pending && box.text !== S.known) {
       S.pending = { baseline: S.known, lastText: box.text, lastChange: now, start: now }
@@ -173,6 +213,12 @@ export function register(on) {
     S.dir = (home || "") + "/.claude/voice-corrections"
     S.debug = (await $.env.get("VOICE_CORRECTIONS_DEBUG")) === "1"
     await loadConfig($, await $.clock.now())
+    try {
+      S.draft.id = (await $.session.id()) || "session"
+    } catch {}
+    S.draft.dir = (home || "") + "/.claude/prompt-drafts"
+    // Old drafts go after DRAFT_KEEP_DAYS ($.fs can't delete; a failure only means they stay).
+    $.process.run(["find", S.draft.dir, "-type", "f", "-name", "*.txt", "-mtime", "+" + DRAFT_KEEP_DAYS, "-delete"]).catch(() => {})
     $.clock.every(POLL_MS, () => tick($).catch(err => log($, `tick failed: ${err && err.message}`)))
     log($, "started")
     return next(e)
@@ -211,6 +257,7 @@ export function register(on) {
     const p = S.pending
     S.pending = null
     S.known = ""
+    S.draft.sent = e.text
     let text = e.text
     if (p) await loadConfig($, await $.clock.now(), true)
     if (p && isDictation(p)) {

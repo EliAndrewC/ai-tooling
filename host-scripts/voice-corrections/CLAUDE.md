@@ -1,7 +1,8 @@
 # voice-corrections: fix dictated prompt text before it is sent
 
 Load this file when: dictated text in Claude Code isn't being corrected (or is corrected wrongly), you're
-adding or changing a correction rule, or you're changing the mod or the space-bar service.
+adding or changing a correction rule, you're changing the mod or the space-bar service, or an unsent
+prompt was lost and you want it back ("Unsent drafts").
 
 Claude Code's voice dictation (hold space) mishears names and game terms the same way every time (Asawa
 Ishii → Isawa Ishi, role → roll). This mod fixes them **in the prompt box**: once Eli releases space and
@@ -10,7 +11,7 @@ before pressing Enter. If he presses Enter sooner, the same correction is applie
 
 | Piece | What it does |
 |---|---|
-| `mod/` | The Claude Code mod. `hooks/register.js` polls the prompt box every 100 ms, `hooks/corrector.mjs` applies the rules. Loaded in every session through `CLAUDE_CODE_PLUGIN_DIRS`: host from `~/.bash_aliases` (`docs/shell/bash_aliases`), containers from launch-container's `~/.bashrc` block (`/host-scripts/voice-corrections/mod`). |
+| `mod/` | The Claude Code mod. `hooks/register.js` polls the prompt box every 100 ms (and autosaves unsent drafts, below), `hooks/corrector.mjs` applies the rules. Loaded in every session through `CLAUDE_CODE_PLUGIN_DIRS`: host from `~/.bash_aliases` (`docs/shell/bash_aliases`), containers from launch-container's `~/.bashrc` block (`/host-scripts/voice-corrections/mod`). |
 | `~/.claude/voice-corrections/corrections.json` | The rules, in order. Shared by host and containers through the `~/.claude` mount. Backed up to `corrections.json` here by the `voice-corrections-backup.path` user unit (`docs/claude-code/`). |
 | `voice-corrections` (on PATH; containers: `/host-scripts/voice-corrections/voice-corrections`) | Adds, removes, lists and checks rules, with a file lock and atomic writes. `--help` has the rule format. |
 | `spacebar-watch.py` + `.service`, installed by `fix-voice-corrections.sh` (Eli, sudo) | System service that publishes whether space is held to `~/.claude/voice-corrections/spacebar`: `0` while held, otherwise the epoch ms of the last release. |
@@ -37,6 +38,21 @@ before pressing Enter. If he presses Enter sooner, the same correction is applie
   applies nothing. `~/.claude/hooks/voice-mod-check.sh` (SessionStart) then shows a warning saying how
   to restart; a "rule that doesn't work" is usually this.
 - The rewrite uses `$.prompt.fill` replace, which leaves the cursor at the end of the box.
+
+## Unsent drafts (autosave)
+
+The same 100 ms poll keeps the prompt box on disk, typed or dictated, in `~/.claude/prompt-drafts/`
+(shared by host and containers; files older than 14 days are removed at session start):
+
+- `<session id>.txt`: the box as of the last 2 s, once it is 40+ characters. Emptied when the box is
+  (a sent prompt is in `~/.claude/history.jsonl`). It survives the session being killed or crashing.
+- `<session id>.<UTC time>Z.cleared.txt`: a draft of 200+ characters that left the box without being
+  sent (Ctrl+C, Esc Esc, recalled history over it): less than half of it remained.
+
+Get one back: `ls -lt ~/.claude/prompt-drafts | head`, then `cat` the file (the session id is the
+transcript's file name). A session started before 2026-11-26 19:30 runs the old mod and saves nothing
+until it is restarted. Why it exists: 2026-11-26, a 15-minute dictated draft seemed lost when a container
+tab dropped (it was still in the box; the launcher now reattaches by itself).
 
 ## `(X -> Y)` footnotes
 
@@ -67,4 +83,6 @@ think → feint). A wrong rewrite is worse than a missed one.
 - Service: `fix-voice-corrections.sh --check` while holding space in another window shows `space: held`.
 - Live: start a new `claude`, `/plugin` shows `voice-corrections` active. Dictate "the Asawa Ishii
   school", release, wait a second: the box changes to "the Isawa Ishi school".
+- Drafts: in a new `claude`, type 200+ characters and wait 3 s: `~/.claude/prompt-drafts/<id>.txt` holds
+  them. Press Ctrl+C: a `.cleared.txt` copy appears and `<id>.txt` is empty.
 - Diagnose: `VOICE_CORRECTIONS_DEBUG=1 claude` logs every decision to `~/.claude/voice-corrections/debug.log`.
