@@ -42,7 +42,8 @@ Reproduce: `../test-capture-stall.py plughw:0,3 0.3` (600,000+ POLLERR a second)
 - **Host:** `install.sh` installs and starts the service (no sudo). `install.sh --check` reports the
   unit, the service, the space-bar state and the pipes.
 - **A container picks it up** on its next `launch-container` from its project folder (`--no-shell` is
-  enough).
+  enough). Sessions already running switch at their next dictation, with no restart: ALSA re-reads
+  `/etc/asound.conf` each time a recording opens (confirmed 2026-11-26 with a days-old session).
 - **Voice silent in a container:** `install.sh --check`, then `test-container-audio.sh` from that
   project folder. `journalctl --user -u container-audio` shows `mic on` / `mic off` per dictation.
 - **Back to the raw device by hand:**
@@ -98,4 +99,5 @@ Reproduce: `../test-capture-stall.py plughw:0,3 0.3` (600,000+ POLLERR a second)
 
 The mic's first audio arrives 150 ms after starting from suspended (7-9 ms when already awake).
 Claude Code starts recording only after the key repeat begins (500 ms), so the 150 ms hold threshold
-plus the cold start fit inside that; not yet observed with a real dictation.
+plus the cold start fit inside that. Confirmed with a real dictation 2026-11-26: `mic on`/`mic off` in the
+journal, the transcription worked, and the raw device stayed closed.
