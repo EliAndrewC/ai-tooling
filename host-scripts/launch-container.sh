@@ -103,7 +103,10 @@
 # Audio: the container gets the host's sound devices (--device /dev/snd, when
 # the host has any), alsa-utils, and a generated /etc/asound.conf pointing
 # ALSA's "default" at the detected mic and speaker - so Claude Code's /voice can
-# record. All three are needed, and each missing piece fails differently:
+# record. Since 2026-11-26 the MIC instead comes through the host's one-way pipe
+# when the host runs the container-audio service (setup_container_audio; that
+# generated config stays as /etc/asound.conf.raw, the fallback):
+# host-scripts/container-audio/CLAUDE.md. All three are needed, and each missing piece fails differently:
 #   * no device nodes -> /proc is NOT namespaced, so /proc/asound/cards shows
 #     the host's mic and voice's availability probe passes; then the capture
 #     floods the terminal with "cannot find card '0'" / "Unknown PCM default".
@@ -575,6 +578,33 @@ attach_loop() {
   done
 }
 
+# Voice through the host's one-way mic pipe (2026-11-26; host-scripts/container-audio/CLAUDE.md). The
+# raw device overran whenever a busy container held Claude Code's recording thread up 100 ms, and its
+# capture library then flooded the screen with POLLERR lines and dropped the tab. The host-owned FIFO
+# lives in the read-only /host-scripts mount, so the container can read it and nothing else. Only when
+# the host service is installed; a container made before this gets its packages here once (like tmux).
+# container-side.sh falls back to the raw device whenever anything is missing.
+setup_container_audio() {
+  [ -f "$HOME/.config/systemd/user/container-audio.service" ] || return 0
+  # The folder THIS container mounts at /host-scripts (an older container may mount an older path).
+  local src dir
+  src="$(podman inspect -f '{{range .Mounts}}{{if eq .Destination "/host-scripts"}}{{.Source}}{{end}}{{end}}' "$NAME" 2>/dev/null)"
+  [ -n "$src" ] && [ -d "$src" ] || return 0
+  dir="$(readlink -f "$src" || true)/container-audio/pipes"   # never abort the launch (set -e) over audio
+  [ "$dir" != /container-audio/pipes ] || return 0
+  mkdir -p -m 700 "$dir" && { [ -p "$dir/$NAME.fifo" ] || mkfifo -m 600 "$dir/$NAME.fifo"; } \
+    || { echo ">> warning: could not create the container-audio pipe for '$NAME'." >&2; return 0; }
+  if ! podman exec "$NAME" sh -c 'command -v pulseaudio && command -v parec && [ -e /usr/lib/x86_64-linux-gnu/alsa-lib/libasound_module_pcm_pulse.so ]' >/dev/null 2>&1; then
+    echo ">> installing pulseaudio into '$NAME' for voice through the host's mic pipe (once)."
+    podman exec --user root --env DEBIAN_FRONTEND=noninteractive "$NAME" bash -c \
+      'apt-get install -y -qq --no-install-recommends pulseaudio pulseaudio-utils libasound2-plugins >/dev/null 2>&1 \
+       || { apt-get update -qq && apt-get install -y -qq --no-install-recommends pulseaudio pulseaudio-utils libasound2-plugins >/dev/null; }' \
+      || echo ">> warning: installing pulseaudio failed (offline?); voice stays on the raw device." >&2
+  fi
+  podman exec --user root "$NAME" sh /host-scripts/container-audio/container-side.sh "$NAME" agent 2>&1 \
+    | grep -E '^>>' || true
+}
+
 open_shell() {
   write_prompt
   set_git_identity
@@ -779,6 +809,7 @@ if [ -n "$(podman ps -q -f "name=^${NAME}$" 2>/dev/null)" ]; then
   podman port "$NAME" 2>/dev/null | sed 's/^/     /' || true
   note_missing_host_scripts
   peer_after_start "$(peer_socks_of)"
+  setup_container_audio
   [ "$SHELL_AFTER" -eq 1 ] || exit 0
   open_shell
 fi
@@ -795,6 +826,7 @@ if podman container exists "$NAME" 2>/dev/null; then
   podman start "$NAME" >/dev/null
   peer_after_start "$STARTED_SOCKS"
   note_missing_host_scripts
+  setup_container_audio
   [ "$SHELL_AFTER" -eq 1 ] || exit 0
   open_shell
 fi
@@ -1094,6 +1126,7 @@ peer_after_start "${PEER_SOCKS:-}"
 # broken install should not cost you the shell, so it warns and continues.
 if [ "$APT" -eq 1 ]; then
   PACKAGES=(alsa-utils tmux)  # tmux: every shell opens in it (see "Every shell opens")
+  PACKAGES+=(pulseaudio pulseaudio-utils libasound2-plugins)  # voice through the host's one-way mic pipe (setup_container_audio)
   while IFS= read -r pkg; do
     [ -n "$pkg" ] || continue
     PACKAGES+=( "$pkg" )
@@ -1230,6 +1263,8 @@ fi
 # ---- seed bash history ----
 # Last provisioning step, so nothing lands after it; open_shell seeds again before every new shell.
 seed_history
+
+setup_container_audio
 
 # --no-shell callers (gm-assistant's scripts/repl.py) want the container up, not a terminal.
 if [ "$SHELL_AFTER" -eq 0 ]; then

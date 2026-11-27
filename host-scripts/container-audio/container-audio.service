@@ -1,0 +1,15 @@
+# Host end of the one-way microphone pipe into dev containers (container-audio-feeder.py; see the
+# CLAUDE.md beside it). Install: host-scripts/container-audio/install.sh
+[Unit]
+Description=container-audio: feed the mic into dev containers' read-only pipes (only while space is held)
+After=pulseaudio.service
+
+[Service]
+ExecStart=/usr/bin/python3 -I %h/ai-tooling/host-scripts/container-audio/container-audio-feeder.py
+Restart=always
+RestartSec=2
+# No Nice=-5: a user service may not raise its priority (it would fail to start). It runs in the
+# user's app slice, which already outranks claude.slice (CPUWeight 100 vs 20).
+
+[Install]
+WantedBy=default.target
