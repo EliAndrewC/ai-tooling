@@ -50,8 +50,8 @@ The same 100 ms poll keeps the prompt box on disk, typed or dictated, in `~/.cla
   sent (Ctrl+C, Esc Esc, recalled history over it): less than half of it remained.
 
 Get one back: `ls -lt ~/.claude/prompt-drafts | head`, then `cat` the file (the session id is the
-transcript's file name). A session started before 2026-11-26 19:30 runs the old mod and saves nothing
-until it is restarted. Why it exists: 2026-11-26, a 15-minute dictated draft seemed lost when a container
+transcript's file name). Running sessions pick up a change to the mod without a restart (seen
+2026-11-26: the days-old diagram session began saving drafts minutes after the install). Why it exists: 2026-11-26, a 15-minute dictated draft seemed lost when a container
 tab dropped (it was still in the box; the launcher now reattaches by itself).
 
 ## `(X -> Y)` footnotes
