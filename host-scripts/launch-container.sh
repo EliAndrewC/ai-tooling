@@ -561,6 +561,17 @@ attach_loop() {
     fi
     echo ">> the connection to '$NAME' dropped; session '$target' kept running (an unsent prompt is still in its box). Reattaching..."
     sleep 1
+    # Whatever flooded the terminal may have painted over a fullscreen program (2026-11-26: error lines
+    # over Claude Code), and tmux redraws that garbage faithfully. Only a real size change makes the
+    # program repaint (SIGWINCH alone does not), so once attached: one column narrower, then back.
+    # Back means UNSETTING window-size: resize-window sets it to manual and `resize-window -A` leaves
+    # it there, so the window would stop following the terminal's size (measured 2026-11-26).
+    ( sleep 3
+      w="$(podman exec "$NAME" tmux display -p -t "=$target:" '#{window_width} #{window_height}' 2>/dev/null)" || exit 0
+      [ "${w% *}" -gt 20 ] 2>/dev/null || exit 0
+      podman exec "$NAME" tmux resize-window -t "=$target:" -x "$(( ${w% *} - 1 ))" -y "${w#* }" 2>/dev/null || true
+      sleep 0.5
+      podman exec "$NAME" tmux set-option -w -u -t "=$target:" window-size 2>/dev/null ) </dev/null >/dev/null 2>&1 &
   done
 }
 
@@ -627,6 +638,7 @@ open_shell() {
     # size, so the shell doesn't start at 80x24 and redraw.
     local created size
     size="$(stty size 2>/dev/null || true)"
+    case "$size" in [1-9]*\ [1-9]*) ;; *) size="" ;; esac   # "0 0" (a pty with no size set): tmux refuses -x 0
     created="$(podman exec --env LANG=C.UTF-8 "$NAME" tmux -u new-session -d -P -F '#{session_name}' \
       ${size:+-x "${size#* }" -y "${size% *}"} 2>/dev/null || true)"
     [ -z "$created" ] || attach_loop "$created"
