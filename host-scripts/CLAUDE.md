@@ -12,6 +12,7 @@ starts. It holds what a container session may want to read about its own environ
 | `propose`, `host-script-proposals` | The proposals queue (below). |
 | `test-proposals.sh` | Tests for the queue tools. Run it after changing either. |
 | `test-launch-container-drop.sh` | The REAL test of that reattach: from the project folder of a running container it floods a throwaway tmux session until podman drops the connection, and checks the launcher reattaches and a detach still ends it (about a minute; touches only its own `droptest` session). Run it after changing `attach_loop`. |
+| `test-capture-stall.py` | Reproduces the voice-input error flood on an ALSA capture device (`Audio capture error ... POLLERR`, which dropped container tabs on 2026-11-26): a reader that stalls longer than the 100 ms buffer. Its docstring has the measurements; run it before and after changing how containers record. |
 | `test-launch-container.sh` | Tests the launcher's mounts (host-scripts, `.volume-overrides/`) and its tmux attach paths (reattach after a dropped connection, bare `--attach`) against a fake podman. Run it after changing the mounts or the shell paths, then do one real launch: the fake can't catch everything (2026-11-26: a real plain launch failed where the fake passed, on a terminal reporting size `0 0`). |
 
 ## Why read-only, and how to change a host script anyway
