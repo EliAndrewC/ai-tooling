@@ -87,8 +87,9 @@ and can be messaged by, every other container's sessions while both run. Message
 Sessions in different permission modes may hold each other's messages for the user's approval.
 
 **Tested 2026-11-26 (Claude Code 2.1.332):** host <-> container and container <-> container round trips,
-launcher-made containers, including stop and start of two together. Not tested: a session started with
-`--dangerously-skip-permissions`, waking an idle interactive session, a real reboot.
+launcher-made containers, including stop and start of two together. **2026-11-28:** a bypass-mode
+(`--dangerously-skip-permissions`) session in an another-account container and an auto-mode host session
+on the host's account, several messages each way, none held. Not tested: a real reboot.
 
 ## Per-project Claude account: `.volume-overrides/`
 
