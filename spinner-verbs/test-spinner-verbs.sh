@@ -76,12 +76,22 @@ python3 "$SV" apply --no-extras --verbs "$T/verbs.json" --settings "$T/settings.
 check "dry run changes nothing" 'grep -q "\"Mine\"\]" "$T/settings.json"'
 python3 "$SV" apply --no-extras --verbs "$T/verbs.json" --settings "$T/settings.json" >/dev/null
 get() { python3 -c "import json;s=json.load(open('$T/settings.json'));print(s.get('model'), s['spinnerVerbs']['mode'], s['spinnerVerbs']['verbs'])"; }
-check "apply merges and keeps other keys" '[ "$(get)" = "opus append ['"'"'Mine'"'"', \"(Pew) Pew Pew'"'"'ing\", '"'"'Refuriating beans'"'"']" ]'
+check "apply merges and keeps other keys" '[ "$(get)" = "opus append ['"'"'Mine'"'"', \"(Pew) Pew Pew'"'"'ing...\", '"'"'Refuriating beans...'"'"']" ]'
 out="$(python3 "$SV" apply --no-extras --verbs "$T/verbs.json" --settings "$T/settings.json")"
 check "apply is idempotent" '[[ "$out" == *"spinnerVerbs already up to date"* ]]'
 echo '{"verbs": ["Refuriating beans", "Wok n rolling"]}' > "$T/verbs2.json"
 out="$(python3 "$SV" apply --no-extras --verbs "$T/verbs2.json" --settings "$T/settings.json")"
-check "apply drops its own removed verb, keeps others" '[[ "$out" == *"- (Pew) Pew Pew'"'"'ing"* && "$out" == *"+ Wok n rolling"* ]] && [ "$(get)" = "opus append ['"'"'Mine'"'"', '"'"'Refuriating beans'"'"', '"'"'Wok n rolling'"'"']" ]'
+check "apply drops its own removed verb, keeps others" '[[ "$out" == *"- (Pew) Pew Pew'"'"'ing..."* && "$out" == *"+ Wok n rolling..."* ]] && [ "$(get)" = "opus append ['"'"'Mine'"'"', '"'"'Refuriating beans...'"'"', '"'"'Wok n rolling...'"'"']" ]'
+# Every verb is written ending in three periods (Claude Code then adds no U+2026 of its own), and
+# an apply from before that rule (bare verbs in applied.json) is replaced, not duplicated.
+printf '{"verbs": ["Bare", "Dotted...", "Uni\\u2026", "\\"Mid...\\" quote"]}' > "$T/dots.json"
+rm "$T/settings.json"
+python3 "$SV" apply --no-extras --verbs "$T/dots.json" --settings "$T/settings.json" >/dev/null
+check "apply ends every verb in three periods" '[ "$(get)" = "None append ['"'"'Bare...'"'"', '"'"'Dotted...'"'"', '"'"'Uni...'"'"', '"'"'\"Mid...\" quote...'"'"']" ]'
+echo '{"spinnerVerbs": {"mode": "append", "verbs": ["Mine", "Bare", "Dotted..."]}}' > "$T/settings.json"
+echo '["Bare", "Dotted..."]' > "$SPINNER_VERBS_STATE/applied.json"
+python3 "$SV" apply --no-extras --verbs "$T/dots.json" --settings "$T/settings.json" >/dev/null
+check "apply replaces an earlier bare apply" '[ "$(get)" = "None append ['"'"'Mine'"'"', '"'"'Bare...'"'"', '"'"'Dotted...'"'"', '"'"'Uni...'"'"', '"'"'\"Mid...\" quote...'"'"']" ]'
 rm "$T/settings.json"
 python3 "$SV" apply --no-extras --verbs "$T/verbs.json" --settings "$T/settings.json" >/dev/null
 check "apply creates missing settings in append mode" '[[ "$(get)" == "None append "* ]]'
@@ -155,7 +165,7 @@ out="$(python3 "$SV" extras --extras "$T/extras.json" 2>&1)"
 check "extras parses verbs, skips a sentence" '[[ "$out" == *"5 extra verbs from 2 categories"* && "$out" == *"skipped '"'"'Someone has been chasing"* && "$out" == *"skipped '"'"'The dude abides.'"'"'"* ]]'
 echo '{"verbs": ["Refuriating beans"]}' > "$T/dsk.json"
 python3 "$SV" apply --verbs "$T/dsk.json" --extras "$T/extras.json" --settings "$T/ex-settings.json" >/dev/null
-check "apply adds extras after DSK, deduped" '[ "$(python3 -c "import json;print(json.load(open(\"$T/ex-settings.json\"))[\"spinnerVerbs\"][\"verbs\"])")" = "['"'"'Refuriating beans'"'"', '"'"'Abiding'"'"', '"'"'Tying the room together'"'"', '"'"'Not expecting the Spanish Inquisition'"'"', '"'"'Not golfing'"'"']" ]'
+check "apply adds extras after DSK, deduped" '[ "$(python3 -c "import json;print(json.load(open(\"$T/ex-settings.json\"))[\"spinnerVerbs\"][\"verbs\"])")" = "['"'"'Refuriating beans...'"'"', '"'"'Abiding...'"'"', '"'"'Tying the room together...'"'"', '"'"'Not expecting the Spanish Inquisition...'"'"', '"'"'Not golfing...'"'"']" ]'
 printf '{"source": "file://%s", "categories": ["Movie Things"], "exclude": ["not golfing"]}' "$T/extras-src.md" > "$T/extras-ex.json"
 check "extras exclude list drops an entry" '[[ "$(python3 "$SV" extras -v --extras "$T/extras-ex.json" 2>&1)" != *"Not golfing"* ]]'
 printf '{"source": "file://%s", "categories": ["Movie Things Phrases"]}' "$T/extras-src.md" > "$T/extras-bad.json"

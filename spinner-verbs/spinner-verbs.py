@@ -533,6 +533,18 @@ def cmd_extras(args):
     print(f"{len(rows)} extra verbs from {len(by)} categories")
 
 
+def three_dots(verb):
+    """The verb as written to settings.json: always ending in three periods.
+
+    Claude Code appends U+2026 to a spinner verb unless it already ends in "..." or U+2026, so a
+    bare verb shows the one-character ellipsis and a verb ending in "..." shows three dots. Ending
+    every verb in "..." makes them all look the same. verbs.json and the ledger stay bare.
+    """
+    if verb.endswith("\u2026"):
+        verb = verb[:-1].rstrip()
+    return verb if verb.endswith("...") else verb + "..."
+
+
 def cmd_apply(args):
     try:
         if args.no_dsk:
@@ -551,6 +563,7 @@ def cmd_apply(args):
                 seen.add(v.casefold())
                 verbs.append(v)
     print(f"{dsk} DSK verbs + {len(verbs) - dsk} extras = {len(verbs)} (plus Claude Code's built-ins)")
+    verbs = [three_dots(v) for v in verbs]
     try:
         with open(args.settings) as f:
             settings = json.load(f)

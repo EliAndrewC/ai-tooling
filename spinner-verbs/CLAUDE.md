@@ -5,6 +5,15 @@ Claude Code spinner verbs ("Making a suspiciously minor change…"). Claude Code
 takes `{"mode": "append" | "replace", "verbs": [...]}`. `apply` always uses **append**, so the
 built-in verbs stay (187 in Claude Code 2.1.332).
 
+**Every verb is written to `settings.json` ending in three periods** (`three_dots` in `apply`;
+`verbs.json` and the ledger stay bare). Claude Code appends the one-character ellipsis (U+2026) to a
+spinner verb unless it already ends in `...` or U+2026, so bare verbs showed "…" and the few titles
+ending in "..." showed three dots. Don't strip the dots again. This relies on unlisted behavior of
+2.1.332, so if verbs start showing `...…` after an update, check that this still prints a match:
+`strings -n 6 "$(readlink -f "$(command -v claude)")" | grep -c '(\\u2026|\\.\\.\\.)\$/'`.
+Still "…", and not changeable from settings: the 187 built-ins, and task or status text on the spinner
+line ("Compacting…"). The brief-mode spinner (`CLAUDE_CODE_BRIEF`) animates its own dots after the verb.
+
 | File | What |
 |---|---|
 | `spinner-verbs.py` | `fetch` / `new` / `status` / `list` / `set` / `export` / `extras` / `apply` (run with `-h`) |
@@ -193,7 +202,7 @@ or one DSK verb in 2.9.
 
 ## Testing
 
-- `bash test-spinner-verbs.sh` should end `53 passed, 0 failed`.
+- `bash test-spinner-verbs.sh` should end `55 passed, 0 failed`.
 - Against the real doc, `./spinner-verbs.py fetch` prints every album with its track count. If the album
   count doesn't match the doc's contents list, it fails and names the album it couldn't find. It warns
   about any non-empty line it drops: today that's only one footnote line.
