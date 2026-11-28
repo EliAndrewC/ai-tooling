@@ -2,8 +2,16 @@
 
 Turns a long-running office joke, a Google Doc listing a fake band's albums and songs, into extra
 Claude Code spinner verbs ("Making a suspiciously minor change…"). Claude Code's `spinnerVerbs` setting
-takes `{"mode": "append" | "replace", "verbs": [...]}`. `apply` always uses **append**, so the
+takes `{"mode": "append" | "replace", "verbs": [...]}`. `apply` uses **append** by default, so the
 built-in verbs stay (187 in Claude Code 2.1.332).
+
+**Built-ins snapshot (Eli's setup).** `builtins --snapshot` reads the built-in verbs out of the `claude`
+executable into `$SPINNER_VERBS_STATE/builtins.json` (private state, never this repo: the list is
+Anthropic's). While that file exists, `apply` uses **replace** mode and writes snapshot + DSK + extras,
+so the built-ins end in three periods as well. Nothing needs doing when Claude Code updates: replace
+mode ignores its list, so new built-ins just don't appear. To pick them up, rerun `builtins --snapshot`
+and `apply`. To go back to append mode, delete `builtins.json` and run `apply`. `builtins` alone shows
+which state it's in.
 
 **Every verb is written to `settings.json` ending in three periods** (`three_dots` in `apply`;
 `verbs.json` and the ledger stay bare). Claude Code appends the one-character ellipsis (U+2026) to a
@@ -11,8 +19,8 @@ spinner verb unless it already ends in `...` or U+2026, so bare verbs showed "�
 ending in "..." showed three dots. Don't strip the dots again. This relies on unlisted behavior of
 2.1.332, so if verbs start showing `...…` after an update, check that this still prints a match:
 `strings -n 6 "$(readlink -f "$(command -v claude)")" | grep -c '(\\u2026|\\.\\.\\.)\$/'`.
-Still "…", and not changeable from settings: the 187 built-ins, and task or status text on the spinner
-line ("Compacting…"). The brief-mode spinner (`CLAUDE_CODE_BRIEF`) animates its own dots after the verb.
+Still "…", and not changeable from settings: task or status text on the spinner line ("Compacting…"),
+and the built-ins unless there's a snapshot (above). The brief-mode spinner (`CLAUDE_CODE_BRIEF`) animates its own dots after the verb.
 
 | File | What |
 |---|---|
@@ -33,7 +41,8 @@ public list. Test fixtures are synthetic for the same reason.
 
 ## Using this yourself (someone other than the maintainer)
 
-`apply` **appends** to the built-in verbs and never replaces them. It keeps the other settings, and a
+`apply` **appends** to the built-in verbs and never replaces them (unless you take a `builtins
+--snapshot`, above). It keeps the other settings, and a
 rerun only removes verbs this tool added before.
 
 ```sh
@@ -202,7 +211,7 @@ or one DSK verb in 2.9.
 
 ## Testing
 
-- `bash test-spinner-verbs.sh` should end `55 passed, 0 failed`.
+- `bash test-spinner-verbs.sh` should end `60 passed, 0 failed`.
 - Against the real doc, `./spinner-verbs.py fetch` prints every album with its track count. If the album
   count doesn't match the doc's contents list, it fails and names the album it couldn't find. It warns
   about any non-empty line it drops: today that's only one footnote line.

@@ -215,5 +215,24 @@ echo '{"Movie Things Phrases": {"This aggression will not stand": "Not letting t
 out="$(python3 "$SV" extras -v --extras "$T/extras-ad.json" 2>&1)"
 check "an approved adaptation is used" '[[ "$out" == *"Not letting this aggression stand"* && "$out" == *"2 extra verbs"* ]]'
 
+# builtins: a snapshot of Claude Code's own verbs, read from its executable, switches apply to
+# replace mode with that copy first; all end in three periods; a custom verb already built in is
+# not repeated; without a snapshot apply appends (checked above).
+printf 'junk\0function c(){let o=R().spinnerVerbs;if(!o)return b;return[...b,...o.verbs]}var b=["Baking","Beboppin%s","Flamb\\xE9ing",%s];more' "'" "$(printf '"V%s",' $(seq 1 20) | sed 's/,$//')" > "$T/claude-9.9.9"
+out="$(python3 "$SV" builtins)"
+check "builtins without a snapshot says apply appends" '[[ "$out" == *"no snapshot"* ]]'
+out="$(python3 "$SV" builtins --snapshot --binary "$T/claude-9.9.9")"
+check "builtins --snapshot reads the list from the executable" '[[ "$out" == "23 built-in verbs"* ]] && [[ "$(python3 "$SV" builtins)" == *"23 built-in verbs from Claude Code claude-9.9.9"* ]]'
+echo '{"verbs": ["Refuriating beans", "baking"]}' > "$T/b-verbs.json"
+echo '{"spinnerVerbs": {"mode": "append", "verbs": ["Mine"]}}' > "$T/b-settings.json"
+out="$(python3 "$SV" apply --no-extras --verbs "$T/b-verbs.json" --settings "$T/b-settings.json")"
+bget() { python3 -c "import json;s=json.load(open('$T/b-settings.json'))['spinnerVerbs'];v=s['verbs'];print(s['mode'], len(v), v[:4], v[-1], all(x.endswith('...') for x in v[1:]))"; }
+check "apply with a snapshot replaces the built-ins with the dotted copy" '[ "$(bget)" = "replace 25 ['"'"'Mine'"'"', '"'"'Baking...'"'"', \"Beboppin'"'"'...\", '"'"'Flambéing...'"'"'] Refuriating beans... True" ] && [[ "$out" == *"1 already built in"* ]]'
+out="$(python3 "$SV" apply --no-extras --verbs "$T/b-verbs.json" --settings "$T/b-settings.json")"
+check "apply with a snapshot is idempotent" '[[ "$out" == *"already up to date"* ]]'
+echo 'nothing here' > "$T/claude-0"
+out="$(python3 "$SV" builtins --snapshot --binary "$T/claude-0" 2>&1)"; rc=$?
+check "builtins --snapshot on an unknown layout prints the fix" '[ $rc -ne 0 ] && [[ "$out" == *"fix:"*"extract_builtins"* ]] && [[ "$(python3 "$SV" builtins)" == *"23 built-in"* ]]'
+
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

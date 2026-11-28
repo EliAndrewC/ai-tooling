@@ -15,14 +15,16 @@ verbs marked yes are exported to a public list, and `apply` appends that list to
   spinner-verbs.py lint         flag verbs that reword the title or lose its punctuation (CLAUDE.md rules)
   spinner-verbs.py export       write the public verbs file from the ledger's "yes" entries
   spinner-verbs.py extras       the verbs extras.json's categories add (downloaded, not stored here)
-  spinner-verbs.py apply        merge the DSK verbs + extras into ~/.claude/settings.json (append mode)
+  spinner-verbs.py builtins     show the snapshot of Claude Code's built-in verbs (--snapshot takes one)
+  spinner-verbs.py apply        merge the DSK verbs + extras into ~/.claude/settings.json (append mode;
+                                with a built-ins snapshot, replace mode with that copy included)
 
 State (private: the ledger and any blocked coworker names) lives in $SPINNER_VERBS_STATE, default
 ~/.config/spinner-verbs/: `config.json` ({"doc": URL, "blocked_words": [...]}, both optional) and
 `ledger.json`.
 See CLAUDE.md next to this file for the review criteria.
 """
-import argparse, json, os, re, sys, tempfile, unicodedata, urllib.request
+import argparse, json, os, re, shutil, sys, tempfile, unicodedata, urllib.request
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 STATE = os.path.expanduser(os.environ.get("SPINNER_VERBS_STATE", "~/.config/spinner-verbs"))
@@ -545,6 +547,47 @@ def three_dots(verb):
     return verb if verb.endswith("...") else verb + "..."
 
 
+def builtins_path():
+    return os.path.join(STATE, "builtins.json")
+
+
+def extract_builtins(binary):
+    """Claude Code's built-in spinner verbs, read out of its executable."""
+    with open(binary, "rb") as f:
+        data = f.read()
+    # function f(){let o=S().spinnerVerbs; ... return[...b,...o.verbs]}var b=["Accomplishing", ...]
+    for m in re.finditer(rb"\.spinnerVerbs;.{0,300}?var [\w$]+=(\[\"[^\]]*\])", data, re.S):
+        try:
+            # JS writes e-acute as \xE9, which JSON doesn't have.
+            verbs = json.loads(re.sub(r"\\x([0-9A-Fa-f]{2})", r"\\u00\1", m.group(1).decode()))
+        except ValueError:
+            continue
+        if len(verbs) > 20 and all(isinstance(v, str) for v in verbs):
+            return verbs
+    die(f"no built-in verb list found in {binary}. fix: the bundled code changed; look for the array "
+        "after `spinnerVerbs` with `strings -n 6 FILE | grep -o 'spinnerVerbs;.\\{400\\}'` and update "
+        "extract_builtins. The existing snapshot still works")
+
+
+def cmd_builtins(args):
+    if not args.snapshot:
+        try:
+            with open(builtins_path()) as f:
+                snap = json.load(f)
+        except FileNotFoundError:
+            print("no snapshot: `apply` appends to Claude Code's built-ins. `builtins --snapshot` "
+                  "copies them so `apply` replaces them (each ending in three periods)")
+            return
+        print(f"{len(snap['verbs'])} built-in verbs from Claude Code {snap.get('version', '?')} "
+              f"in {builtins_path()}; `apply` uses replace mode")
+        return
+    binary = os.path.realpath(args.binary or shutil.which("claude") or die(
+        "claude is not on PATH. fix: pass --binary /path/to/claude"))
+    verbs = extract_builtins(binary)
+    write_json(builtins_path(), {"version": os.path.basename(binary), "verbs": verbs})
+    print(f"{len(verbs)} built-in verbs from {binary} -> {builtins_path()}; run `apply`")
+
+
 def cmd_apply(args):
     try:
         if args.no_dsk:
@@ -562,7 +605,23 @@ def cmd_apply(args):
             if v.casefold() not in seen:
                 seen.add(v.casefold())
                 verbs.append(v)
-    print(f"{dsk} DSK verbs + {len(verbs) - dsk} extras = {len(verbs)} (plus Claude Code's built-ins)")
+    # With a snapshot of the built-ins (`builtins --snapshot`), replace them with that copy so they end
+    # in three periods too. Without one, append and leave Claude Code's own list alone.
+    try:
+        with open(builtins_path()) as f:
+            builtins = json.load(f)["verbs"]
+    except FileNotFoundError:
+        builtins = None
+    if builtins is None:
+        print(f"{dsk} DSK verbs + {len(verbs) - dsk} extras = {len(verbs)} (plus Claude Code's built-ins)")
+    else:
+        seen = {v.casefold() for v in builtins}
+        custom = [v for v in verbs if v.casefold() not in seen]
+        print(f"{len(builtins)} built-ins (snapshot) + {dsk} DSK verbs + {len(verbs) - dsk} extras = "
+              f"{len(builtins) + len(custom)}" + (f" ({len(verbs) - len(custom)} already built in)"
+                                                   if len(custom) != len(verbs) else ""))
+        verbs = builtins + custom
+    mode = "append" if builtins is None else "replace"
     verbs = [three_dots(v) for v in verbs]
     try:
         with open(args.settings) as f:
@@ -578,10 +637,10 @@ def cmd_apply(args):
     sv = settings.get("spinnerVerbs") or {}
     # Keep verbs someone else added; drop only the ones this tool wrote last time.
     others = [v for v in sv.get("verbs", []) if v not in previously and v not in verbs]
-    # Always append: the point is to add to the built-in verbs, never to replace them.
-    if sv.get("mode", "append") != "append":
-        print(f"spinnerVerbs mode was {sv.get('mode')!r}; setting it to 'append' so the built-ins stay")
-    new = {"mode": "append", "verbs": others + verbs}
+    if sv.get("mode", "append") != mode:
+        print(f"spinnerVerbs mode was {sv.get('mode')!r}; setting it to {mode!r} " + (
+            "so the built-ins stay" if mode == "append" else "(the built-ins come from the snapshot)"))
+    new = {"mode": mode, "verbs": others + verbs}
     if new == sv:
         print("spinnerVerbs already up to date")
         return
@@ -629,6 +688,11 @@ def main():
     s.add_argument("-v", "--verbose", action="store_true", help="list the verbs too")
     s.add_argument("--pending", action="store_true", help="adapted-category entries with no adaptation yet")
     s.set_defaults(fn=cmd_extras)
+    s = sub.add_parser("builtins", help="show, or with --snapshot copy, Claude Code's built-in verbs")
+    s.add_argument("--snapshot", action="store_true", help="copy them from the claude executable into "
+                   "the state folder; `apply` then replaces the built-ins with that copy")
+    s.add_argument("--binary", help="the claude executable (default: the one on PATH)")
+    s.set_defaults(fn=cmd_builtins)
     s = sub.add_parser("apply"); s.add_argument("--verbs", default=VERBS_FILE)
     s.add_argument("--extras", default=EXTRAS_FILE)
     s.add_argument("--no-extras", action="store_true", help="only the DSK verbs")
