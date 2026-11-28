@@ -53,8 +53,9 @@ fix; a symlink at the old path is enough, no recreate needed.
 
 ## Session messaging between host and containers
 
-Since 2026-11-26 a container on the host's Claude account shares two things with the host and with every
-other such container, so `ListAgents` / `SendMessage` work host <-> container and container <-> container:
+Since 2026-11-26 a container shares two things with the host and with every other container (since
+2026-11-28 also a `.volume-overrides/` project on another person's account: two people sharing the machine
+can have their sessions hand each other work, e.g. a host session doing device access for that container), so `ListAgents` / `SendMessage` work host <-> container and container <-> container:
 
 - the session registry `~/.claude/sessions/` (records `<pid>.json`, pid as that container sees it, plus the
   per-session `.key` files), which is simply inside the `~/.claude` mount;
@@ -70,10 +71,10 @@ container's pid counter up to `slot * 5000` (`peer_after_start`; slots in `~/.cl
 one per existing container). Don't share the registry without it. A chance collision between two
 long-lived sessions stays possible and very unlikely; the fix is the one above (rewrite the record).
 
-**Not shared:** a `.volume-overrides/` project (another person's account), `CONTAINER_PEERS=0`, or a host
-without `XDG_RUNTIME_DIR`: that container gets its own registry (`~/.claude/container-sessions/<container>/`)
-and no socket folder. A container made before 2026-11-26 has no socket folder either; attaching prints a
-note and `--fresh` applies it.
+**Not shared:** a launch with `CONTAINER_PEERS=0` (the way to keep one project apart), or a host without
+`XDG_RUNTIME_DIR`: that container gets its own registry (`~/.claude/container-sessions/<container>/`) and no
+socket folder. A container made before 2026-11-26 (another-account project: before 2026-11-28) has no socket
+folder either; attaching prints a note and `--fresh` applies it.
 
 **Confirm it works:** in a container session, `ListAgents` lists the host's sessions. From the host:
 `ls $XDG_RUNTIME_DIR/cc-socks` shows one `<pid>.sock` per live session, and `podman exec <c> sh -c 'stat -c %i
@@ -81,7 +82,8 @@ $XDG_RUNTIME_DIR/cc-socks'` prints the same inode as on the host. A different in
 was recreated (reboot, logout) while the container ran: restart the container through the launcher.
 
 **What it opens up:** any container session can put a message in front of the host's sessions and read the
-registry's key files. Messages arrive marked as coming from another session and can't approve anything.
+registry's key files. That includes across accounts: an another-account project's sessions are listed to,
+and can be messaged by, every other container's sessions while both run. Messages arrive marked as coming from another session and can't approve anything.
 Sessions in different permission modes may hold each other's messages for the user's approval.
 
 **Tested 2026-11-26 (Claude Code 2.1.332):** host <-> container and container <-> container round trips,

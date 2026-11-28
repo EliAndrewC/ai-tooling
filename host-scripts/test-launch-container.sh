@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Tests for launch-container.sh's mounts, against a FAKE podman that records `podman run`'s
 # arguments (no container is started). Run: host-scripts/test-launch-container.sh  (exit 0 = all green)
-# Covers the workdir (/<folder name>), the /host-scripts mounts, session messaging (shared socket folder, pid slots; private registry for another account) and the .volume-overrides/ account override.
+# Covers the workdir (/<folder name>), the /host-scripts mounts, session messaging (shared socket folder, pid slots, another-account projects included; private registry with CONTAINER_PEERS=0) and the .volume-overrides/ account override.
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
 T="$(mktemp -d)"
@@ -94,7 +94,11 @@ check "launch line names both overrides" 'grep -qx ">> volume-overrides: .claude
 check "credentials created as {} (logged out)" '[ "$(cat "$V/.claude/.credentials.json")" = "{}" ]'
 check ".claude.json seeded from the host's, minus oauthAccount" 'python3 -c "import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if \"oauthAccount\" not in d and d.get(\"hasCompletedOnboarding\") else 1)" "$V/.claude.json"'
 check "files are regular files, mode 600; folders 700" '[ -f "$V/.claude.json" ] && [ "$(stat -c %a "$V/.claude.json" "$V/.claude/.credentials.json" "$V" "$V/.claude" | tr "\n" " ")" = "600 600 700 700 " ]'
-check "another account: own session registry (mode 700), after ~/.claude, and no socket folder" '[ "$(vols other | grep -n -e ":/home/agent/.claude:z$" | cut -d: -f1)" -lt "$(vols other | grep -n -x -e "$T/home/.claude/container-sessions/[^:]*:/home/agent/.claude/sessions:z" | cut -d: -f1)" ] && [ "$(stat -c %a "$T"/home/.claude/container-sessions/*)" = 700 ] && ! vols other | grep -q cc-socks && ! grep -q "XDG_RUNTIME_DIR" "$T/other.args"'
+check "another account: session messaging shared like any project (socket folder, XDG_RUNTIME_DIR, no private registry)" 'vols other | grep -qx "$T/run/cc-socks:$T/run/cc-socks:z" && grep -A1 -x -- --env "$T/other.args" | grep -qx "XDG_RUNTIME_DIR=$T/run" && ! vols other | grep -q ":/home/agent/.claude/sessions:" && grep -q "session messaging: sharing the session list" <<<"$OUT"'
+check "another account: gets a pid slot (the shared registry needs the offset)" 'grep -qx "[0-9]* claude-other" "$T/home/.claude/container-pid-slots"'
+CONTAINER_PEERS=0 launch other
+check "CONTAINER_PEERS=0: own session registry (mode 700), after ~/.claude, and no socket folder" '[ "$(vols other | grep -n -e ":/home/agent/.claude:z$" | cut -d: -f1)" -lt "$(vols other | grep -n -x -e "$T/home/.claude/container-sessions/[^:]*:/home/agent/.claude/sessions:z" | cut -d: -f1)" ] && [ "$(stat -c %a "$T"/home/.claude/container-sessions/*)" = 700 ] && ! vols other | grep -q cc-socks && ! grep -q "XDG_RUNTIME_DIR" "$T/other.args" && grep -q "session messaging: off for" <<<"$OUT"'
+launch other
 check "override mounts come after the ~/.claude mount" '[ "$(vols other | grep -n -e ":/home/agent/.claude:z$" | cut -d: -f1)" -lt "$(vols other | grep -n -e "credentials.json:/home/agent/.claude/.credentials.json:z$" | cut -d: -f1)" ]'
 check "override .claude.json REPLACES the host's mount (one mount there, no duplicate)" '[ "$(vols other | grep -c ":/home/agent/.claude.json:")" = 1 ] && vols other | grep -q "volume-overrides/.claude.json:/home/agent/.claude.json:z$" && ! grep -q "duplicate mount" <<<"$OUT"'
 check "host config untouched" 'grep -q oauthAccount "$T/home/.claude.json" && [ ! -e "$T/home/.claude/.credentials.json" ]'

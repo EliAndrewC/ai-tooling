@@ -24,7 +24,7 @@
 #       - the host's Claude socket folder ($XDG_RUNTIME_DIR/cc-socks) at the same
 #         path, so sessions here, on the host and in other containers can list
 #         and message each other (see "Session messaging" near the mounts;
-#         CONTAINER_PEERS=0 turns it off, another-account projects never get it)
+#         CONTAINER_PEERS=0 turns it off; another-account projects get it too)
 #       - any extra host mounts the repo declares (see below)
 #       - the project's .volume-overrides/ files, if it has that folder, on top of
 #         the Claude config: a per-project Claude account (see "Per-project
@@ -708,9 +708,10 @@ note_missing_host_scripts() {
   fi
   # A container made before session messaging (2026-11-26) has no shared socket folder: it either
   # has its own session list or shares the host's without a pid offset (see peer_after_start).
+  # (An another-account project made before 2026-11-28 is in the same state: it got no socket folder.)
   if grep -q ' /home/agent/\.claude ' <<<" $mounts " && ! grep -q '/cc-socks ' <<<"$mounts " \
-      && [ ! -e "$REPO_ROOT/.volume-overrides" ] && [ "${CONTAINER_PEERS:-1}" = 1 ]; then
-    echo ">> note: '$NAME' was made before session messaging, so its Claude sessions can't list or message"
+      && [ "${CONTAINER_PEERS:-1}" = 1 ]; then
+    echo ">> note: '$NAME' was made without session messaging, so its Claude sessions can't list or message"
     echo "   the host's or other containers' sessions. Relaunch with --fresh to enable it (finish its work first)."
   fi
 }
@@ -916,11 +917,14 @@ if [ "$MOUNT_CLAUDE" -eq 1 ]; then
   # container starts its pids at its own offset: peer_after_start below. Don't share the registry
   # without that offset.
   #
-  # A project on ANOTHER person's account (.volume-overrides/) keeps its own registry and gets no
-  # socket folder, as does any launch with CONTAINER_PEERS=0 or without XDG_RUNTIME_DIR: its
-  # sessions neither see nor message the others.
-  if [ "${CONTAINER_PEERS:-1}" = 1 ] && [ -n "${XDG_RUNTIME_DIR:-}" ] \
-      && [ ! -e "$REPO_ROOT/.volume-overrides" ] && [ ! -L "$REPO_ROOT/.volume-overrides" ]; then
+  # A project on ANOTHER person's account (.volume-overrides/) shares both too (since 2026-11-28;
+  # before that it was kept apart): the two accounts' sessions on this machine can then hand each
+  # other work, e.g. a host session doing device access for that container. A registry record
+  # carries no account, and only the credentials differ. CONTAINER_PEERS=0 keeps a container apart.
+  #
+  # A launch with CONTAINER_PEERS=0 or without XDG_RUNTIME_DIR keeps its own registry and gets no
+  # socket folder: its sessions neither see nor message the others.
+  if [ "${CONTAINER_PEERS:-1}" = 1 ] && [ -n "${XDG_RUNTIME_DIR:-}" ]; then
     PEER_SOCKS="$XDG_RUNTIME_DIR/cc-socks"
     mkdir -p -m 700 "$PEER_SOCKS"
     RUN_ARGS+=( --volume "$PEER_SOCKS:$PEER_SOCKS:z" --env "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" )
@@ -929,7 +933,7 @@ if [ "$MOUNT_CLAUDE" -eq 1 ]; then
     mkdir -p "$CLAUDE_SRC/.claude/container-sessions/$NAME"
     chmod 700 "$CLAUDE_SRC/.claude/container-sessions/$NAME" 2>/dev/null || true
     RUN_ARGS+=( --volume "$CLAUDE_SRC/.claude/container-sessions/$NAME:/home/agent/.claude/sessions:z" )
-    echo ">> session messaging: off for '$NAME' (its own session list; another account, CONTAINER_PEERS=0 or no XDG_RUNTIME_DIR)"
+    echo ">> session messaging: off for '$NAME' (its own session list; CONTAINER_PEERS=0 or no XDG_RUNTIME_DIR)"
   fi
   echo ">> Claude config: mounting from $CLAUDE_SRC (created if missing, so login persists)"
 else
