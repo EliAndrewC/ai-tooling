@@ -15,7 +15,8 @@
 #       sessions that are simply done).
 # A memguard kill (CLAUDE.md, "memguard") has two texts: events/<seq>.mine.txt goes to the sessions
 # listed in events/<seq>.to (by session id, or by container pid namespace + claude pid, which still
-# matches after /clear changes the id), events/<seq>.txt to everyone else.
+# matches after /clear changes the id), events/<seq>.txt to everyone else. An empty .txt reaches no
+# one else: that is how a host session sends one container session a message (memwatch/CLAUDE.md).
 # Events are delivered for 60 minutes. A session or subagent seen for the first time gets only the
 # last 10 minutes' events. Never fails a hook: every path but the wake-up exits 0.
 
@@ -95,7 +96,9 @@ def take(key):
             p = os.path.join(mw, "events", "%d.txt" % seq)
             try:
                 if now - os.path.getmtime(p) <= (FIRST if first else EXPIRE):
-                    out.append(text(seq))
+                    t = text(seq)
+                    if t:  # an empty text = "not for you" (a message targeted by .to alone)
+                        out.append(t)
             except OSError:
                 pass
         if top != seen or first:

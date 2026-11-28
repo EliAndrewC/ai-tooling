@@ -79,6 +79,13 @@ session whose job died with "Killed" / exit 137 then knows why, and doesn't just
   - Events are delivered for 60 min. A session or subagent seen for the first time gets only the last 10 min.
 - **Gap:** work Claude launched outside its own task tracking (`nohup … &`) doesn't count as
   "something running", so that session isn't woken.
+- **Messaging one session that `SendMessage` can't reach** (e.g. a container made before the shared socket
+  folder): write a targeted event by hand. `events/<seq>.mine.txt` = the message, `events/<seq>.to` =
+  `sid:<session id>` and/or `pid:<readlink /proc/<pid>/ns/pid>:<claude pid as the container sees it>`
+  (`podman exec <c> pgrep -x claude`), `events/<seq>.txt` **empty** (an empty text reaches no one else;
+  the hook skips it since 2026-11-28), then `latest` = `<seq> <epoch>`, each via a temp file + `mv`. Start the
+  message by saying it isn't a memory event: the hook's header calls it one. Delivered when
+  `seen/<session id>` reaches `<seq>`.
 - **Why not the session inbox socket** (cross-session messaging, which would also wake idle
   sessions): its message format isn't documented, and reading it out of the binary was blocked
   (it touches the session token). `asyncRewake` is documented and does the same job.
